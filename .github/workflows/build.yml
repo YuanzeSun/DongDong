@@ -15,8 +15,12 @@ jobs:
         include:
           - runner: macos-latest
             command: dist:mac
-            artifact: dongdong-macos
-            archive: release/*.dmg
+            artifact: dongdong-macos-arm64
+            archive: release/*.pkg
+          - runner: macos-13
+            command: dist:mac:x64
+            artifact: dongdong-macos-x64
+            archive: release/*.pkg
           - runner: windows-latest
             command: dist:win
             artifact: dongdong-windows

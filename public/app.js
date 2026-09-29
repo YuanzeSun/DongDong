@@ -1,13 +1,16 @@
 const $ = id => document.getElementById(id);
 const desktop = window.petDesktop;
-const SESSION_KEY = 'dongdong-session-v2';
-const senderId = localStorage.getItem('dongdong-sender-id-v2') || crypto.randomUUID();
-localStorage.setItem('dongdong-sender-id-v2', senderId);
+const SESSION_KEY = 'dongdong-session-v3';
+const senderId = localStorage.getItem('dongdong-sender-id-v3') || crypto.randomUUID();
+localStorage.setItem('dongdong-sender-id-v3', senderId);
 
 const state = {
-  mode: 'host', url: '', key: '', name: '', socket: null,
+  mode: 'host', url: '', key: '', token: '', name: '', socket: null,
   connected: false, expanded: false, pinned: true, view: 'chat', peerOnline: false,
-  reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, pose: 'idle'
+  peerName: '对方', peerStatus: 'offline', status: 'available', profile: {},
+  reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, pose: 'idle',
+  idleActions: JSON.parse(localStorage.getItem('dongdong-idle-actions') ?? 'true'),
+  notifications: JSON.parse(localStorage.getItem('dongdong-notifications') ?? 'true')
 };
 const seenEvents = new Set();
 let poseTimer;
@@ -44,11 +47,12 @@ function setStatus(text, kind = '') {
 function setPose(pose) {
   state.pose = pose;
   const pet = $('mainMascot');
-  pet.classList.remove('wiggle', 'happy', 'jump', 'nap', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'delivery', 'receive', 'speech-pop');
+  pet.classList.remove('wiggle', 'happy', 'jump', 'nap', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'delivery', 'receive', 'speech-pop', 'hug', 'kiss', 'groom', 'purr');
   pet.style.backgroundImage = `url('./mascot${pose === 'idle' ? '' : `-${pose}`}.svg')`;
   if (pose === 'wave') pet.classList.add('wiggle');
   if (pose === 'happy') pet.classList.add('happy');
   if (pose === 'nap') pet.classList.add('nap');
+  if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(pose)) pet.classList.add(pose);
 }
 
 function scheduleNap() {
@@ -63,7 +67,7 @@ function scheduleNap() {
 
 function scheduleIdleAction() {
   clearTimeout(state.idleTimer);
-  if (!state.connected || !state.peerOnline || state.walking) return;
+  if (!state.connected || !state.peerOnline || state.walking || !state.idleActions) return;
   state.idleTimer = setTimeout(() => {
     if (!state.connected || !state.peerOnline || state.walking || state.pose !== 'idle') return scheduleIdleAction();
     const action = ['blink', 'happy', 'wiggle'][Math.floor(Math.random() * 3)];
@@ -79,8 +83,13 @@ function scheduleIdleAction() {
 }
 
 function setPeerOnline(online) {
-  state.peerOnline = Boolean(online);
-  $('presenceText').textContent = state.peerOnline ? '对方在线' : '对方离线，小猫正在休息';
+  const presence = typeof online === 'object' ? online : { online };
+  state.peerOnline = Boolean(presence.online);
+  state.peerName = presence.peerName || state.peerName || '对方';
+  state.peerStatus = presence.peerStatus || (state.peerOnline ? 'available' : 'offline');
+  desktop?.setOnline(state.peerOnline);
+  const statusLabel = { available: '在线陪伴', busy: '忙碌中', away: '暂时离开', offline: '离线' }[state.peerStatus] || '在线';
+  $('presenceText').textContent = state.peerOnline ? `${state.peerName} · ${statusLabel}` : `${state.peerName} 离线，小猫正在休息`;
   $('presenceDot').classList.toggle('online', state.peerOnline);
   $('presenceDot').classList.toggle('offline', !state.peerOnline);
   if (state.peerOnline) {
@@ -132,15 +141,10 @@ function animateRemoteAction(kind) {
   }
   const pet = $('mainMascot');
   clearTimeout(poseTimer);
-  setPose('idle');
-  pet.classList.remove('sit', 'stretch');
+  setPose(kind);
   void pet.offsetWidth;
-  if (kind === 'sit' || kind === 'stretch') {
-    pet.classList.add(kind);
-    poseTimer = setTimeout(() => { pet.classList.remove(kind); setPose(state.peerOnline ? 'idle' : 'nap'); }, 1800);
-  } else {
-    animatePet(kind === 'fish' ? 'fish' : kind === 'pet' ? 'pet' : kind);
-  }
+  pet.classList.add(kind);
+  poseTimer = setTimeout(() => setPose(state.peerOnline ? 'idle' : 'nap'), kind === 'jump' ? 2200 : 1800);
 }
 
 function setMode(mode) {
@@ -203,15 +207,37 @@ function normalizeAddress(value) {
 }
 
 async function request(route, options = {}) {
+  const headers = state.token ? { 'X-Pet-Session': state.token } : { 'X-Pet-Key': state.key };
   const response = await fetch(`${state.url}/api${route}`, {
     ...options,
-    headers: { 'X-Pet-Key': state.key, ...options.headers }
+    headers: { ...headers, ...options.headers }
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error || `请求失败 (${response.status})`);
   }
   return response;
+}
+
+function applyProfile(profile = {}) {
+  state.profile = { petName: '咚咚', anniversary: '', note: '', ...profile };
+  $('petNameLabel').textContent = state.profile.petName || '咚咚';
+  $('anniversaryLabel').textContent = state.profile.anniversary ? `♡ ${state.profile.anniversary}` : '';
+  $('coupleBadge').hidden = !state.connected;
+  $('profilePetName').value = state.profile.petName || '';
+  $('profileAnniversary').value = state.profile.anniversary || '';
+  $('profileNote').value = state.profile.note || '';
+}
+
+async function openSession(url, key, name, mode) {
+  const response = await fetch(`${url}/api/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Pet-Key': key },
+    body: JSON.stringify({ senderId, senderName: name, mode })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `连接失败 (${response.status})`);
+  return body;
 }
 
 function formatTime(value) {
@@ -268,7 +294,7 @@ function renderEvent(event) {
   } else {
     const body = document.createElement('div');
     body.className = 'event-body';
-    const labels = { wave: '👋 向你招了招手', walk: '🐾 让你的小猫散步', jump: '✨ 让你的小猫乱蹦', pet: '🤍 摸摸小猫', fish: '🐟 投喂小鱼干', sit: '🪑 让小猫坐下', sleep: '💤 让小猫睡觉', stretch: '☀ 让小猫伸懒腰' };
+    const labels = { wave: '👋 向你招了招手', walk: '🐾 让你的小猫散步', jump: '✨ 让你的小猫乱蹦', pet: '🤍 摸摸小猫', fish: '🐟 投喂小鱼干', sit: '🪑 让小猫坐下', sleep: '💤 让小猫睡觉', stretch: '☀ 让小猫伸懒腰', hug: '🫂 给你一个抱抱', kiss: '💋 亲亲你', groom: '🧶 给你梳梳毛', purr: '💗 在你身边呼噜' };
     body.textContent = labels[event.kind] || event.text;
     wrapper.appendChild(body);
   }
@@ -281,30 +307,31 @@ function onEvent(event) {
   seenEvents.add(event.id);
   if (event.kind === 'delivery') {
     if (event.senderId !== senderId) {
-      const [name, progressText] = String(event.text || '').split('|');
-      const progress = Number(progressText) / 100;
+      const data = event.data || {};
+      const name = data.name || String(event.text || '').split('|')[0] || '一封信';
+      const progress = Number(data.progress ?? String(event.text || '').split('|')[1] ?? 0) / 100;
       animateDelivery(progress);
-      speak(`${event.senderName} 正在递来 ${name || '一封信'} · ${Math.round(progress * 100)}%`);
+      speak(`${event.senderName} 正在递来 ${name} · ${Math.round(progress * 100)}%`);
     }
     return;
   }
   $('events').querySelector('.empty-state')?.remove();
   renderEvent(event);
   if (event.senderId !== senderId) {
-    const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦' };
+    const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
     const message = event.kind === 'file' ? `收到文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 来打招呼啦` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : event.text;
     speak(message, actionText[event.kind] ? 'alert' : 'normal');
     if (event.kind === 'file' || event.kind === 'message') animateReceive();
     else if (event.kind === 'walk' && desktop) desktop.startWalk();
     else if (event.kind === 'wave') animatePet('wiggle');
     else if (actionText[event.kind]) animateRemoteAction(event.kind);
-    if (desktop) desktop.notify('咚咚', event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
+    if (desktop && state.notifications) desktop.notify('咚咚', event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
   }
 }
 
 function openSocket() {
   if (!state.connected) return;
-  const socket = new WebSocket(`${state.url.replace(/^http/, 'ws')}/ws?v=2&key=${encodeURIComponent(state.key)}&senderId=${encodeURIComponent(senderId)}&mode=${encodeURIComponent(state.mode)}`);
+  const socket = new WebSocket(`${state.url.replace(/^http/, 'ws')}/ws?v=3&session=${encodeURIComponent(state.token)}`);
   state.socket = socket;
   socket.onopen = async () => {
     setStatus('已连接', 'online');
@@ -316,7 +343,8 @@ function openSocket() {
   socket.onmessage = message => {
     const payload = JSON.parse(message.data);
     if (payload.type === 'event') onEvent(payload.event);
-    if (payload.type === 'presence') setPeerOnline(payload.online);
+    if (payload.type === 'presence') setPeerOnline(payload);
+    if (payload.type === 'profile') applyProfile(payload.profile);
   };
   socket.onclose = () => {
     if (!state.connected || state.socket !== socket) return;
@@ -332,6 +360,9 @@ async function connect(url, key, name, mode) {
   state.key = key.trim();
   state.name = name.trim().slice(0, 24);
   state.mode = mode;
+  const session = await openSession(state.url, state.key, state.name, mode);
+  state.token = session.token;
+  state.profile = session.profile || {};
   const response = await request('/events');
   const events = await response.json();
   state.connected = true;
@@ -355,7 +386,8 @@ async function connect(url, key, name, mode) {
     const latest = visibleEvents[visibleEvents.length - 1];
     $('speech').textContent = latest.kind === 'file' ? `${latest.senderName} 发来文件` : latest.kind === 'wave' ? `${latest.senderName} 来打招呼啦` : latest.text;
   }
-  setPeerOnline(false);
+  applyProfile(state.profile);
+  setPeerOnline(session.presence || false);
   const showSettings = mode === 'host' && Boolean(desktop);
   setView(showSettings ? 'connection' : 'chat');
   setExpanded(showSettings || !desktop);
@@ -374,6 +406,7 @@ async function connect(url, key, name, mode) {
 }
 
 async function disconnect() {
+  try { if (state.token) await request('/leave', { method: 'POST' }); } catch { /* Room may already be gone. */ }
   state.connected = false;
   if (state.walking) await desktop?.stopWalk();
   clearInterval(walkFrameTimer);
@@ -384,6 +417,7 @@ async function disconnect() {
   clearTimeout(state.reconnectTimer);
   state.socket?.close();
   state.socket = null;
+  state.token = '';
   if (state.hostStarted && desktop) await desktop.stopHost();
   state.hostStarted = false;
   localStorage.removeItem(SESSION_KEY);
@@ -398,18 +432,18 @@ async function disconnect() {
   if (desktop) desktop.setWindowSize(true);
 }
 
-async function sendEvent(kind, text = '') {
+async function sendEvent(kind, text = '', data = {}) {
   try {
     if (kind === 'message') animateDelivery(0);
     await request('/events', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind, text, senderId, senderName: state.name })
+      body: JSON.stringify({ kind, text, data, clientId: crypto.randomUUID() })
     });
     if (kind === 'wave') {
       speak('招手送出去了');
     } else if (kind === 'walk') speak('已经让对方散步啦', 'alert');
     else if (kind === 'jump') speak('已经让对方乱蹦啦', 'alert');
-    else if (['pet', 'fish', 'sit', 'sleep', 'stretch'].includes(kind)) speak('动作送到对方那里啦', 'alert');
+    else if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(kind)) speak('动作送到对方那里啦', 'alert');
   } catch (error) { toast(error.message); }
 }
 
@@ -420,20 +454,24 @@ async function sendFile(file) {
   form.append('file', file);
   form.append('senderId', senderId);
   form.append('senderName', state.name);
+  form.append('fileName', file.name);
+  form.append('clientId', crypto.randomUUID());
   speak(`叼着 ${file.name} 送过去…`);
-  await sendEvent('delivery', `${file.name}|0`);
+  const transferId = crypto.randomUUID();
+  animateDelivery(0);
+  await sendEvent('delivery', '', { transferId, name: file.name, progress: 0, status: 'preparing' });
   try {
     const event = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       let lastProgress = -1;
       xhr.open('POST', `${state.url}/api/files`);
-      xhr.setRequestHeader('X-Pet-Key', state.key);
+      xhr.setRequestHeader('X-Pet-Session', state.token);
       xhr.upload.onprogress = progress => {
         if (!progress.lengthComputable) return;
         const ratio = progress.loaded / progress.total;
         if (ratio < 1 && ratio - lastProgress < 0.1) return;
         lastProgress = ratio;
-        sendEvent('delivery', `${file.name}|${Math.round(ratio * 100)}`);
+        sendEvent('delivery', '', { transferId, name: file.name, progress: Math.round(ratio * 100), status: ratio >= 1 ? 'complete' : 'uploading' });
         speak(`叼着文件走到窗口 ${Math.round(ratio * 100)}%`);
       };
       xhr.onload = () => {
@@ -444,6 +482,7 @@ async function sendFile(file) {
       xhr.send(form);
     });
     speak(`${event.fileName} 已送到窗口`);
+    await sendEvent('delivery', '', { transferId, name: event.fileName, progress: 100, status: 'complete' });
   } catch (error) { toast(error.message); speak('发送失败', 'alert'); }
   $('fileInput').value = '';
 }
@@ -468,6 +507,17 @@ async function init() {
     $('appSettings').hidden = true;
     $('setup').hidden = false;
   });
+  $('idleActionsToggle').checked = state.idleActions;
+  $('desktopNotificationsToggle').checked = state.notifications;
+  $('idleActionsToggle').addEventListener('change', event => {
+    state.idleActions = event.target.checked;
+    localStorage.setItem('dongdong-idle-actions', JSON.stringify(state.idleActions));
+    if (state.idleActions) scheduleIdleAction(); else clearTimeout(state.idleTimer);
+  });
+  $('desktopNotificationsToggle').addEventListener('change', event => {
+    state.notifications = event.target.checked;
+    localStorage.setItem('dongdong-notifications', JSON.stringify(state.notifications));
+  });
   $('pinButton').addEventListener('click', async () => {
     state.pinned = !state.pinned;
     await desktop?.setPinned(state.pinned);
@@ -491,6 +541,10 @@ async function init() {
   $('contextDisconnect').addEventListener('click', () => { $('contextMenu').hidden = true; disconnect(); });
   document.addEventListener('click', event => { if (!event.target.closest('#contextMenu')) $('contextMenu').hidden = true; });
   $('waveButton').addEventListener('click', () => sendEvent('wave'));
+  $('careButton').addEventListener('click', () => {
+    if (!state.connected || !state.peerOnline) return toast('对方当前不在线');
+    sendEvent('message', '今天也要好好吃饭呀');
+  });
   $('actionMenuButton').addEventListener('click', () => { $('actionTray').hidden = !$('actionTray').hidden; });
   document.querySelectorAll('.action-choice').forEach(button => button.addEventListener('click', () => {
     if (!state.connected || !state.peerOnline) return toast('对方当前不在线');
@@ -498,13 +552,29 @@ async function init() {
     sendEvent(button.dataset.action);
   }));
   if (desktop) desktop.onWalkState(onWalkState);
+  if (desktop?.onMenuAction) desktop.onMenuAction(action => {
+    if (action === 'settings') { setExpanded(true); setView('connection'); }
+    if (action === 'show') setExpanded(state.connected ? state.expanded : true);
+  });
   $('openButton').addEventListener('click', () => setExpanded(true));
   $('collapseButton').addEventListener('click', () => setExpanded(false));
   $('chatTab').addEventListener('click', () => setView('chat'));
   $('connectionTab').addEventListener('click', () => setView('connection'));
   $('disconnectButton').addEventListener('click', disconnect);
+  $('openDownloadsButton').addEventListener('click', () => desktop?.openDownloads());
   $('copyAddress').addEventListener('click', () => copy(state.url));
   $('copyKey').addEventListener('click', () => copy(state.key));
+  $('presenceStatus').addEventListener('change', async event => {
+    try { await request('/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: event.target.value }) }); }
+    catch (error) { toast(error.message); }
+  });
+  $('saveProfileButton').addEventListener('click', async () => {
+    try {
+      const response = await request('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ petName: $('profilePetName').value.trim(), anniversary: $('profileAnniversary').value, note: $('profileNote').value.trim() }) });
+      applyProfile(await response.json());
+      toast('共享资料已更新');
+    } catch (error) { toast(error.message); }
+  });
   $('quickFileButton').addEventListener('click', () => $('fileInput').click());
   $('fileButton').addEventListener('click', () => $('fileInput').click());
   $('fileInput').addEventListener('change', event => sendFile(event.target.files[0]));
@@ -515,7 +585,7 @@ async function init() {
     if (!text) return;
     input.value = '';
     (async () => {
-      await sendEvent('delivery', `${text.slice(0, 180)}|0`);
+      await sendEvent('delivery', '', { transferId: crypto.randomUUID(), name: text.slice(0, 180), progress: 0, status: 'preparing' });
       await sendEvent('message', text);
     })();
   });
@@ -550,7 +620,7 @@ async function init() {
     event.preventDefault();
     $('setupFeedback').textContent = '';
     try {
-      const result = await desktop.startHost($('hostAddress').value);
+      const result = await desktop.startHost($('hostAddress').value, senderId);
       state.hostStarted = true;
       await connect(result.url, result.key, $('hostName').value, 'host');
     } catch (error) { $('setupFeedback').textContent = error.message; }
@@ -593,7 +663,7 @@ async function init() {
     try {
       if (saved.mode === 'host' && desktop) {
         const address = new URL(saved.url).hostname;
-        const result = await desktop.startHost(address);
+        const result = await desktop.startHost(address, senderId);
         state.hostStarted = true;
         await connect(result.url, result.key, saved.name, 'host');
       } else await connect(saved.url, saved.key, saved.name, 'join');

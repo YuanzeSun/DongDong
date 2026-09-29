@@ -7,6 +7,7 @@
   <title>咚咚 · 桌面传送门</title>
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./pet.css">
+  <link rel="stylesheet" href="./animations.css">
   <script src="./app.js" defer></script>
 </head>
 <body>
@@ -47,14 +48,17 @@
 
     <section class="app-settings" id="appSettings" hidden>
       <h1>应用设置</h1>
-      <p class="settings-intro">调整咚咚的启动方式和桌宠体验。</p>
+      <p class="settings-intro">调整咚咚的启动方式和陪伴节奏。</p>
       <label class="setting-row" for="autoLaunchSetup"><span><strong>开机自启动</strong><small>登录系统后自动打开咚咚</small></span><input type="checkbox" id="autoLaunchSetup"></label>
+      <label class="setting-row" for="idleActionsToggle"><span><strong>允许小猫自己玩</strong><small>对方在线时偶尔眨眼、打盹或撒娇</small></span><input type="checkbox" id="idleActionsToggle" checked></label>
+      <label class="setting-row" for="desktopNotificationsToggle"><span><strong>桌面通知</strong><small>收到消息或文件时提醒我</small></span><input type="checkbox" id="desktopNotificationsToggle" checked></label>
       <button class="text-button" id="settingsBackButton">返回连接</button>
     </section>
 
     <section class="companion" id="companion" hidden>
       <div class="companion-main">
         <div class="speech" id="speech">点击我，打个招呼吧</div>
+        <div class="couple-badge" id="coupleBadge" hidden><span id="petNameLabel">咚咚</span><span id="anniversaryLabel"></span></div>
         <button class="mascot-button" id="mascotButton" title="摸摸咚咚" aria-label="摸摸咚咚"><span class="mascot" id="mainMascot"></span></button>
         <span class="floor-shadow"></span>
         <div class="context-menu" id="contextMenu" hidden>
@@ -65,6 +69,7 @@
       <div class="compact-actions" id="compactActions">
         <button class="action-button wave-button" id="waveButton" title="向对方招手"><img src="./icons/hand.svg" alt=""><span>招手</span></button>
         <button class="action-button" id="actionMenuButton" title="更多动作"><img src="./icons/sparkles.svg" alt=""><span>动作</span></button>
+        <button class="action-button" id="careButton" title="给对方一句关心"><img src="./icons/heart.svg" alt=""><span>关心</span></button>
         <button class="action-button" id="openButton" title="展开消息"><img src="./icons/message-circle.svg" alt=""><span>消息</span></button>
         <button class="action-button" id="quickFileButton" title="发送文件"><img src="./icons/paperclip.svg" alt=""><span>文件</span></button>
       </div>
@@ -76,6 +81,10 @@
         <button class="action-choice" data-action="sleep"><span>💤</span>睡觉</button>
         <button class="action-choice" data-action="stretch"><span>☀</span>伸懒腰</button>
         <button class="action-choice" data-action="jump"><img src="./icons/sparkles.svg" alt="">乱蹦</button>
+        <button class="action-choice" data-action="hug"><span>🫂</span>抱抱</button>
+        <button class="action-choice" data-action="kiss"><span>💋</span>亲亲</button>
+        <button class="action-choice" data-action="groom"><span>🧶</span>梳毛</button>
+        <button class="action-choice" data-action="purr"><span>💗</span>呼噜</button>
       </div>
       <div class="expanded" id="expanded" hidden>
         <div class="tabs" role="tablist" aria-label="房间视图">
@@ -97,7 +106,16 @@
           <p class="connection-label">房间地址</p><div class="copy-line"><code id="roomAddress"></code><button class="icon-button copy-button" id="copyAddress" title="复制地址" aria-label="复制地址"><img src="./icons/copy.svg" alt=""></button></div>
           <div id="hostKeyBlock"><p class="connection-label">配对码</p><div class="copy-line"><code id="roomKey"></code><button class="icon-button copy-button" id="copyKey" title="复制配对码" aria-label="复制配对码"><img src="./icons/copy.svg" alt=""></button></div></div>
           <p class="connection-hint">把地址和配对码发给对方。收到的文件会保存到本机“下载”文件夹。</p>
+          <div class="shared-profile">
+            <h3>你们的小窝</h3>
+            <label>小猫昵称<input id="profilePetName" maxlength="24" placeholder="例如：橘子"></label>
+            <label>纪念日<input id="profileAnniversary" type="date"></label>
+            <label>给对方的一句话<textarea id="profileNote" maxlength="180" rows="2" placeholder="今天也要好好吃饭呀"></textarea></label>
+            <button class="secondary-button" id="saveProfileButton" type="button">保存共享资料</button>
+          </div>
+          <label class="setting-row status-row" for="presenceStatus"><span><strong>我的状态</strong><small>对方会看到这个状态</small></span><select id="presenceStatus"><option value="available">在线陪伴</option><option value="busy">忙碌中</option><option value="away">暂时离开</option></select></label>
           <label class="setting-row" for="autoLaunchToggle"><span><strong>开机自启动</strong><small>登录系统后自动打开咚咚</small></span><input type="checkbox" id="autoLaunchToggle"></label>
+          <button class="text-button" id="openDownloadsButton" type="button">打开下载文件夹</button>
           <button class="text-button disconnect-button" id="disconnectButton">退出房间</button>
         </div>
       </div>

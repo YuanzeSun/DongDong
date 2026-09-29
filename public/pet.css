@@ -48,3 +48,25 @@
   50% { transform: scale(1.025, .985); }
 }
 @media (prefers-reduced-motion: reduce) { .mascot.nap { animation: none; } }
+.couple-badge { position:absolute; top:48px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid #dcebe3; border-radius:999px; background:#ffffffd9; color:#4f7565; box-shadow:0 3px 10px #2b4a3614; font-size:10px; z-index:3; white-space:nowrap; }
+.couple-badge span:first-child { color:#c46355; font-weight:800; }
+.couple-badge span + span { color:#8b9f95; }
+.shared-profile { margin:16px 0 4px; padding:12px; border:1px solid #dfeae4; border-radius:8px; background:#f8fcfa; }
+.shared-profile h3 { margin:0 0 10px; color:#426a5a; font-size:12px; }
+.shared-profile label { display:grid; gap:5px; margin-top:8px; color:#718b7f; font-size:10px; font-weight:700; }
+.shared-profile input,.shared-profile textarea { width:100%; border:1px solid #d3e3da; border-radius:5px; background:#fff; color:#28473b; padding:7px 8px; font:inherit; font-weight:400; resize:vertical; }
+.secondary-button { width:100%; height:32px; margin-top:10px; border:1px solid #b8d8c8; border-radius:5px; color:#28735d; background:#e8f6ee; font-size:11px; font-weight:800; }
+.secondary-button:hover { background:#d9f0e3; }
+.status-row select { height:28px; border:1px solid #cfe0d6; border-radius:5px; padding:0 6px; background:#fff; color:#3b6354; font-size:11px; }
+.open-downloads-button { margin-top:10px; }
+.care-button { color:#b65b56; }
+.care-button img { filter:invert(40%) sepia(29%) saturate(1100%) hue-rotate(320deg); }
+.action-tray { grid-template-columns:repeat(4,1fr); }
+.mascot.hug { animation:hug-cat .9s ease-in-out 2; }
+.mascot.kiss { animation:kiss-cat .8s ease-in-out 2; }
+.mascot.groom { animation:groom-cat .7s ease-in-out 3; }
+.mascot.purr { animation:purr-cat 1.3s ease-in-out 2; }
+@keyframes hug-cat { 0%,100% { transform:scale(1); } 45% { transform:scale(1.13) rotate(-3deg); } }
+@keyframes kiss-cat { 0%,100% { transform:translateX(0); } 40% { transform:translateX(5px) rotate(5deg); } 70% { transform:translateX(-2px) rotate(-2deg); } }
+@keyframes groom-cat { 0%,100% { transform:rotate(0); } 35% { transform:rotate(-7deg) translateY(2px); } 70% { transform:rotate(7deg) translateY(2px); } }
+@keyframes purr-cat { 0%,100% { transform:scale(1); filter:drop-shadow(0 10px 9px #2b68552b); } 50% { transform:scale(1.04); filter:drop-shadow(0 0 12px #f49c8a88); } }
