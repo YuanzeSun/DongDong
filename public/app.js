@@ -10,7 +10,7 @@ const state = {
   peerName: '对方', profile: {},
   reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, pose: 'idle',
   idleActions: JSON.parse(localStorage.getItem('dongdong-idle-actions') ?? 'true'),
-  peeked: false,
+  peeked: false, edgeHold: false, edgeAutoOuting: false,
   notifications: JSON.parse(localStorage.getItem('dongdong-notifications') ?? 'true')
 };
 const seenEvents = new Set();
@@ -19,6 +19,8 @@ let napTimer;
 let blinkTimer;
 let walkFrameTimer;
 let peekTimer;
+let peekOutingTimer;
+let edgeHoldTimer;
 let deliveryFinishTimer;
 const pendingDeliveries = new Map();
 
@@ -71,29 +73,77 @@ function scheduleNap() {
 
 function schedulePeek() {
   clearTimeout(peekTimer);
-  if (!state.connected || state.expanded || state.walking || state.peeked) return;
+  if (!state.connected || state.expanded || state.walking || state.peeked || state.edgeHold || state.edgeAutoOuting) return;
   peekTimer = setTimeout(() => {
-    if (!state.connected || state.expanded || state.walking || state.peeked) return schedulePeek();
+    if (!state.connected || state.expanded || state.walking || state.peeked || state.edgeHold || state.edgeAutoOuting) return schedulePeek();
     state.peeked = true;
+    clearTimeout(state.idleTimer);
     $('window').classList.add('peeked');
     desktop?.setPeeked(true);
+    schedulePeekOuting();
   }, 70000 + Math.random() * 50000);
 }
 
-function unpeek() {
+function schedulePeekOuting() {
+  clearTimeout(peekOutingTimer);
+  if (!state.connected || state.expanded || !state.peeked || state.edgeHold) return;
+  peekOutingTimer = setTimeout(() => {
+    if (!state.connected || state.expanded || !state.peeked || state.edgeHold) return;
+    state.edgeAutoOuting = true;
+    state.peeked = false;
+    $('window').classList.remove('peeked');
+    desktop?.setPeeked(false);
+    const outings = desktop ? ['walk', 'sit', 'stretch', 'nap', 'happy'] : ['sit', 'stretch', 'nap', 'happy'];
+    const outing = outings[Math.floor(Math.random() * outings.length)];
+    if (outing === 'walk' && desktop) {
+      desktop.startWalk().then(started => { if (!started) finishPeekOuting(); });
+    }
+    else {
+      setPose(outing);
+      speak({ sit: '出来坐一会儿…', stretch: '出来伸个懒腰…', nap: '出来趴一会儿…', happy: '出来晃一晃…' }[outing] || '出来走两步…');
+      setTimeout(finishPeekOuting, 2400);
+    }
+  }, 90000 + Math.random() * 90000);
+}
+
+function finishPeekOuting() {
+  if (!state.edgeAutoOuting) return;
+  state.edgeAutoOuting = false;
+  if (!state.connected || state.expanded || state.edgeHold) return;
+  state.peeked = true;
+  clearTimeout(state.idleTimer);
+  $('window').classList.add('peeked');
+  desktop?.setPeeked(true);
+  schedulePeekOuting();
+}
+
+function unpeek(userInitiated = false) {
   clearTimeout(peekTimer);
+  clearTimeout(peekOutingTimer);
+  const wasEdgeState = state.peeked || state.edgeAutoOuting;
+  if (userInitiated && wasEdgeState) {
+    state.edgeHold = true;
+    state.edgeAutoOuting = false;
+    clearTimeout(edgeHoldTimer);
+    edgeHoldTimer = setTimeout(() => {
+      state.edgeHold = false;
+      schedulePeek();
+    }, 180000);
+    desktop?.stopWalk();
+  }
   if (!state.peeked) return;
   state.peeked = false;
   $('window').classList.remove('peeked');
   desktop?.setPeeked(false);
-  schedulePeek();
+  if (userInitiated) scheduleIdleAction();
+  if (!userInitiated) schedulePeek();
 }
 
 function scheduleIdleAction() {
   clearTimeout(state.idleTimer);
   if (!state.connected || !state.peerOnline || state.walking || state.peeked || !state.idleActions) return;
   state.idleTimer = setTimeout(() => {
-    if (!state.connected || !state.peerOnline || state.walking || state.pose !== 'idle') return scheduleIdleAction();
+    if (!state.connected || !state.peerOnline || state.walking || state.peeked || state.edgeAutoOuting || state.pose !== 'idle') return scheduleIdleAction();
     const action = ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'nap', 'walk'][Math.floor(Math.random() * 7)];
     if (action === 'blink') {
       setPose('blink');
@@ -207,7 +257,7 @@ function setMode(mode) {
 
 function setExpanded(expanded) {
   state.expanded = expanded;
-  if (expanded) unpeek();
+  if (expanded) unpeek(true);
   $('window').classList.toggle('compact', !expanded);
   $('expanded').hidden = !expanded;
   $('compactActions').hidden = expanded;
@@ -229,7 +279,8 @@ function onWalkState(walking) {
     speak('出门散步啦', 'alert');
   } else if (state.connected) {
     setPose('idle');
-    scheduleNap();
+    if (state.edgeAutoOuting) setTimeout(finishPeekOuting, 1800);
+    else scheduleNap();
   }
 }
 
@@ -351,6 +402,7 @@ function renderEvent(event) {
 function onEvent(event) {
   if (seenEvents.has(event.id)) return;
   seenEvents.add(event.id);
+  if (event.senderId !== senderId) unpeek(true);
   if (event.kind === 'delivery') {
     if (event.senderId !== senderId) {
       const data = event.data || {};
@@ -467,6 +519,10 @@ async function disconnect() {
   clearInterval(blinkTimer);
   clearTimeout(state.idleTimer);
   clearTimeout(peekTimer);
+  clearTimeout(peekOutingTimer);
+  clearTimeout(edgeHoldTimer);
+  state.edgeHold = false;
+  state.edgeAutoOuting = false;
   state.peeked = false;
   $('window').classList.remove('peeked');
   clearTimeout(state.reconnectTimer);

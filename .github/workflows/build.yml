@@ -17,10 +17,6 @@ jobs:
             command: dist:mac
             artifact: dongdong-macos-arm64
             archive: release/*.dmg
-          - runner: macos-latest
-            command: dist:mac:x64
-            artifact: dongdong-macos-x64
-            archive: release/*.dmg
           - runner: windows-latest
             command: dist:win
             artifact: dongdong-windows
@@ -37,6 +33,13 @@ jobs:
       - run: npm run ${{ matrix.command }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify macOS app signature
+        if: matrix.command == 'dist:mac'
+        shell: bash
+        run: |
+          app_path="$(find release -type d -name '*.app' -print -quit)"
+          test -n "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
