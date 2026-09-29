@@ -47,17 +47,19 @@
     </section>
 
     <section class="app-settings" id="appSettings" hidden>
-      <h1>应用设置</h1>
+      <div class="settings-heading">
+        <button class="view-back-button" id="settingsBackButton" type="button" title="回到连接"><img src="./icons/arrow-left.svg" alt=""><span>回到连接</span></button>
+        <h1>应用设置</h1>
+      </div>
       <p class="settings-intro">调整咚咚的启动方式和陪伴节奏。</p>
       <label class="setting-row" for="autoLaunchSetup"><span><strong>开机自启动</strong><small>登录系统后自动打开咚咚</small></span><input type="checkbox" id="autoLaunchSetup"></label>
       <label class="setting-row" for="idleActionsToggle"><span><strong>允许小猫自己玩</strong><small>对方在线时偶尔眨眼、打盹或撒娇</small></span><input type="checkbox" id="idleActionsToggle" checked></label>
       <label class="setting-row" for="desktopNotificationsToggle"><span><strong>桌面通知</strong><small>收到消息或文件时提醒我</small></span><input type="checkbox" id="desktopNotificationsToggle" checked></label>
-      <button class="text-button" id="settingsBackButton">返回连接</button>
     </section>
 
     <section class="companion" id="companion" hidden>
       <div class="companion-main">
-        <div class="speech" id="speech">点击我，打个招呼吧</div>
+        <div class="speech" id="speech" aria-live="polite"></div>
         <div class="couple-badge" id="coupleBadge" hidden><span id="petNameLabel">咚咚</span></div>
         <button class="mascot-button" id="mascotButton" title="摸摸咚咚" aria-label="摸摸咚咚"><span class="mascot" id="mainMascot"></span></button>
         <span class="floor-shadow"></span>
@@ -74,25 +76,23 @@
         <button class="action-button" id="quickFileButton" title="发送文件"><img src="./icons/paperclip.svg" alt=""><span>文件</span></button>
       </div>
       <div class="action-tray" id="actionTray" hidden>
-        <button class="action-choice local-action" data-action="pet" data-target="local"><span>🤍</span>摸摸这只</button>
-        <button class="action-choice remote-action" data-action="pet" data-target="remote"><span>🤍</span>摸摸那只</button>
-        <button class="action-choice local-action" data-action="fish" data-target="local"><span>🐟</span>喂我家猫</button>
-        <button class="action-choice remote-action" data-action="fish" data-target="remote"><span>🐟</span>给你家猫</button>
-        <button class="action-choice remote-action" data-action="walk" data-target="remote"><img src="./icons/footprints.svg" alt="">叫它散步</button>
-        <button class="action-choice remote-action" data-action="sit" data-target="remote"><span>🪑</span>坐一会儿</button>
-        <button class="action-choice remote-action" data-action="sleep" data-target="remote"><span>💤</span>睡一会儿</button>
-        <button class="action-choice remote-action" data-action="stretch" data-target="remote"><span>☀</span>伸个懒腰</button>
-        <button class="action-choice remote-action" data-action="jump" data-target="remote"><img src="./icons/sparkles.svg" alt="">蹦跶一下</button>
-        <button class="action-choice remote-action" data-action="hug" data-target="remote"><span>🫂</span>抱一下</button>
-        <button class="action-choice remote-action" data-action="kiss" data-target="remote"><span>💋</span>亲一下</button>
-        <button class="action-choice remote-action" data-action="groom" data-target="remote"><span>🧶</span>梳梳毛</button>
-        <button class="action-choice remote-action" data-action="purr" data-target="remote"><span>💗</span>听呼噜</button>
+        <button class="action-choice" data-action="pet"><span>🤍</span>摸摸</button>
+        <button class="action-choice" data-action="fish"><span>🐟</span>小鱼干</button>
+        <button class="action-choice" data-action="walk"><img src="./icons/footprints.svg" alt="">散步</button>
+        <button class="action-choice" data-action="sit"><span>🪑</span>坐下</button>
+        <button class="action-choice" data-action="sleep"><span>💤</span>睡觉</button>
+        <button class="action-choice" data-action="stretch"><span>☀</span>伸懒腰</button>
+        <button class="action-choice" data-action="jump"><img src="./icons/sparkles.svg" alt="">蹦跶</button>
+        <button class="action-choice" data-action="hug"><span>🫂</span>抱抱</button>
+        <button class="action-choice" data-action="kiss"><span>💋</span>亲亲</button>
+        <button class="action-choice" data-action="groom"><span>🧶</span>梳毛</button>
+        <button class="action-choice" data-action="purr"><span>💗</span>呼噜</button>
       </div>
       <div class="expanded" id="expanded" hidden>
         <div class="tabs" role="tablist" aria-label="房间视图">
           <button class="selected" id="chatTab" role="tab" aria-selected="true">对话</button>
           <button id="connectionTab" role="tab" aria-selected="false">设置</button>
-          <button class="collapse-button" id="collapseButton" title="收起小窗" aria-label="收起小窗"><img src="./icons/chevron-down.svg" alt=""></button>
+          <button class="collapse-button return-button" id="collapseButton" title="回到小猫" aria-label="回到小猫"><img src="./icons/arrow-left.svg" alt=""><span>回到小猫</span></button>
         </div>
         <div id="chatView" class="chat-view">
           <div class="events" id="events" aria-live="polite"></div>

@@ -58,6 +58,17 @@ else {
     ipcMain.handle('start-host', async (_event, requestedAddress, senderId) => { const address = tailscaleAddresses().find(item => item.address === requestedAddress)?.address; if (!address) throw new Error('没有找到这个 Tailscale 地址，请确认 Tailscale 已连接'); if (room) await room.close(); room = createRoom({ host: address, port: PORT, key: getKey(), hostId: String(senderId || ''), dataDir: path.join(app.getPath('userData'), 'room-v3'), staticDir: path.join(__dirname, '..', 'public') }); try { await room.listen(); } catch (error) { room = null; throw error; } return { url: `http://${address}:${PORT}`, key: getKey() }; });
     ipcMain.handle('stop-host', async () => { if (room) await room.close(); room = null; });
     ipcMain.handle('window-size', (_event, expanded) => { if (!window || window.isDestroyed()) return; if (expanded) stopWalk(); if (peeked) setPeeked(false); const [width, height] = expanded ? [420, 700] : [300, 340]; const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea; window.setBounds(clampBounds({ x: bounds.x + bounds.width - width, y: bounds.y + bounds.height - height, width, height }, area)); });
+    ipcMain.on('move-window', (_event, dx, dy) => {
+      if (!window || window.isDestroyed()) return;
+      const deltaX = Number(dx); const deltaY = Number(dy);
+      if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+      if (walkTimer) stopWalk();
+      const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
+      window.setPosition(Math.round(bounds.x + deltaX), Math.round(bounds.y + deltaY), false);
+      const next = window.getBounds();
+      const clamped = clampBounds(next, area);
+      if (next.x !== clamped.x || next.y !== clamped.y) window.setPosition(clamped.x, clamped.y, false);
+    });
     ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', () => startWalk()); ipcMain.handle('stop-walk', () => stopWalk());
     ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) stopWalk(); return isOnline; }); ipcMain.handle('set-ignore-mouse-events', (_event, ignore, options = {}) => window?.setIgnoreMouseEvents(Boolean(ignore), { forward: options.forward !== false }));
     ipcMain.handle('set-peeked', (_event, next) => setPeeked(next));

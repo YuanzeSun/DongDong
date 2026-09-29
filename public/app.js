@@ -30,7 +30,10 @@ function speak(message, kind = 'normal') {
   void $('speech').offsetWidth;
   $('speech').classList.add(kind === 'alert' ? 'speech-alert' : 'speech-pop');
   clearTimeout(speak.timer);
-  speak.timer = setTimeout(() => $('speech').classList.remove('speech-pop', 'speech-alert'), 1800);
+  speak.timer = setTimeout(() => {
+    $('speech').classList.remove('speech-pop', 'speech-alert');
+    $('speech').textContent = '';
+  }, 1800);
 }
 
 function setAutoLaunchToggles(value) {
@@ -67,7 +70,6 @@ function scheduleNap() {
     if (!state.connected) return;
     if (state.peerOnline) return scheduleIdleAction();
     setPose('nap');
-    speak('对方离线，先睡一会儿…', 'alert');
   }, state.peerOnline ? 45000 : 250);
 }
 
@@ -100,7 +102,6 @@ function schedulePeekOuting() {
     }
     else {
       setPose(outing);
-      speak({ sit: '出来坐一会儿…', stretch: '出来伸个懒腰…', nap: '出来趴一会儿…', happy: '出来晃一晃…' }[outing] || '出来走两步…');
       setTimeout(finishPeekOuting, 2400);
     }
   }, 90000 + Math.random() * 90000);
@@ -147,14 +148,11 @@ function scheduleIdleAction() {
     const action = ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'nap', 'walk'][Math.floor(Math.random() * 7)];
     if (action === 'blink') {
       setPose('blink');
-      speak('喵？');
       setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, 260);
     } else if (action === 'walk' && desktop) {
-      speak('悄悄出来走两步…');
       desktop.startWalk();
     } else if (action === 'nap') {
       setPose('nap');
-      speak('趴一会儿…');
       setTimeout(() => { if (state.connected && state.pose === 'nap') setPose('idle'); }, 2600);
     } else if (['sit', 'stretch'].includes(action)) {
       setPose(action);
@@ -217,23 +215,9 @@ function animateReceive() {
   poseTimer = setTimeout(() => { pet.classList.remove('receive'); setPose(state.peerOnline ? 'idle' : 'nap'); }, 1600);
 }
 
-function localAction(kind) {
-  clearTimeout(poseTimer);
-  if (kind === 'sleep') {
-    setPose('nap');
-    speak('我家的小猫睡一会儿…');
-    return;
-  }
-  setPose(kind);
-  const duration = kind === 'purr' ? 2600 : 1800;
-  poseTimer = setTimeout(() => setPose(state.peerOnline ? 'idle' : 'nap'), duration);
-  speak({ pet: '摸摸我家的猫', fish: '给我家的猫一条小鱼干' }[kind] || '我家的猫做了个小动作');
-}
-
 function animateRemoteAction(kind) {
   if (kind === 'sleep') {
     setPose('nap');
-    speak('对方让你睡一会儿…');
     return;
   }
   const pet = $('mainMascot');
@@ -292,6 +276,26 @@ function setView(view) {
   $('connectionTab').setAttribute('aria-selected', view === 'connection');
   $('chatView').hidden = view !== 'chat';
   $('connectionView').hidden = view !== 'connection';
+}
+
+function returnFromSettings() {
+  if (!$('appSettings').hidden) {
+    $('appSettings').hidden = true;
+    if (state.connected) {
+      $('companion').hidden = false;
+      setView('chat');
+      setExpanded(false);
+    } else {
+      $('setup').hidden = false;
+    }
+    return;
+  }
+  if (state.connected) {
+    setView('chat');
+    setExpanded(false);
+  } else {
+    $('setup').hidden = false;
+  }
 }
 
 function normalizeAddress(value) {
@@ -416,8 +420,12 @@ function onEvent(event) {
   }
   $('events').querySelector('.empty-state')?.remove();
   renderEvent(event);
+  const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
+  if (event.kind === 'walk' && desktop) desktop.startWalk();
+  else if (event.kind === 'walk') animateRemoteAction('happy');
+  else if (event.kind === 'wave') animatePet('wiggle');
+  else if (actionText[event.kind]) animateRemoteAction(event.kind);
   if (event.senderId !== senderId) {
-    const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
     const message = event.kind === 'file' ? `收到文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 来打招呼啦` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : event.text;
     speak(message, actionText[event.kind] ? 'alert' : 'normal');
     if (event.kind === 'file' || event.kind === 'message') {
@@ -425,9 +433,6 @@ function onEvent(event) {
       pendingDeliveries.delete(event.senderId);
       setTimeout(animateReceive, started ? Math.max(0, 650 - (Date.now() - started)) : 0);
     }
-    else if (event.kind === 'walk' && desktop) desktop.startWalk();
-    else if (event.kind === 'wave') animatePet('wiggle');
-    else if (actionText[event.kind]) animateRemoteAction(event.kind);
     if (desktop && state.notifications) desktop.notify('咚咚', event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
   }
 }
@@ -486,14 +491,12 @@ async function connect(url, key, name, mode) {
     $('events').appendChild(empty);
   } else {
     events.forEach(event => { seenEvents.add(event.id); if (event.kind !== 'delivery') renderEvent(event); });
-    const latest = visibleEvents[visibleEvents.length - 1];
-    $('speech').textContent = latest.kind === 'file' ? `${latest.senderName} 发来文件` : latest.kind === 'wave' ? `${latest.senderName} 来打招呼啦` : latest.text;
+    $('speech').textContent = '';
   }
   applyProfile(state.profile);
   setPeerOnline(session.presence || false);
-  const showSettings = mode === 'host' && Boolean(desktop);
-  setView(showSettings ? 'connection' : 'chat');
-  setExpanded(showSettings || !desktop);
+  setView('chat');
+  setExpanded(!desktop);
   setStatus('已连接', 'online');
   setPose('idle');
   scheduleNap();
@@ -621,17 +624,20 @@ async function copy(value) {
 async function init() {
   $('hostTab').addEventListener('click', () => setMode('host'));
   $('joinTab').addEventListener('click', () => setMode('join'));
-  $('closeButton').addEventListener('click', () => desktop?.close());
+  $('closeButton').addEventListener('click', () => {
+    if (!$('appSettings').hidden || (state.connected && state.expanded)) {
+      returnFromSettings();
+      return;
+    }
+    desktop?.close();
+  });
   $('settingsButton').addEventListener('click', () => {
     if (state.connected) { setExpanded(true); setView('connection'); return; }
     $('setup').hidden = true;
     $('appSettings').hidden = false;
     desktop?.setWindowSize(true);
   });
-  $('settingsBackButton').addEventListener('click', () => {
-    $('appSettings').hidden = true;
-    $('setup').hidden = false;
-  });
+  $('settingsBackButton').addEventListener('click', returnFromSettings);
   $('idleActionsToggle').checked = state.idleActions;
   $('desktopNotificationsToggle').checked = state.notifications;
   $('idleActionsToggle').addEventListener('change', event => {
@@ -650,9 +656,43 @@ async function init() {
     $('pinButton').classList.toggle('unpinned', !state.pinned);
   });
   $('mascotButton').addEventListener('click', () => {
+    if (mascotDrag.suppressClick) { mascotDrag.suppressClick = false; return; }
+    if (!state.connected || !state.peerOnline) { toast('对方当前不在线'); return; }
     unpeek();
-    localAction('pet');
+    sendEvent('pet');
   });
+  const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: false, suppressClick: false };
+  $('mascotButton').addEventListener('pointerdown', event => {
+    if (event.button !== 0 || !desktop?.moveWindow) return;
+    mascotDrag.pointerId = event.pointerId;
+    mascotDrag.startX = event.screenX;
+    mascotDrag.startY = event.screenY;
+    mascotDrag.lastX = event.screenX;
+    mascotDrag.lastY = event.screenY;
+    mascotDrag.moved = false;
+    mascotDrag.suppressClick = false;
+    $('mascotButton').setPointerCapture?.(event.pointerId);
+  });
+  $('mascotButton').addEventListener('pointermove', event => {
+    if (mascotDrag.pointerId !== event.pointerId) return;
+    if (!mascotDrag.moved && Math.hypot(event.screenX - mascotDrag.startX, event.screenY - mascotDrag.startY) < 4) return;
+    const deltaX = event.screenX - mascotDrag.lastX;
+    const deltaY = event.screenY - mascotDrag.lastY;
+    mascotDrag.lastX = event.screenX;
+    mascotDrag.lastY = event.screenY;
+    mascotDrag.moved = true;
+    mascotDrag.suppressClick = true;
+    event.preventDefault();
+    desktop.moveWindow(deltaX, deltaY);
+  });
+  const finishMascotDrag = event => {
+    if (mascotDrag.pointerId !== event.pointerId) return;
+    mascotDrag.pointerId = null;
+    if (mascotDrag.moved) mascotDrag.suppressClick = true;
+    $('mascotButton').releasePointerCapture?.(event.pointerId);
+  };
+  $('mascotButton').addEventListener('pointerup', finishMascotDrag);
+  $('mascotButton').addEventListener('pointercancel', finishMascotDrag);
   $('mascotButton').addEventListener('contextmenu', event => {
     if (!state.connected) return;
     event.preventDefault();
@@ -674,11 +714,6 @@ async function init() {
   });
   $('actionMenuButton').addEventListener('click', () => { $('actionTray').hidden = !$('actionTray').hidden; });
   document.querySelectorAll('.action-choice').forEach(button => button.addEventListener('click', () => {
-    if (button.dataset.target === 'local') {
-      $('actionTray').hidden = true;
-      localAction(button.dataset.action);
-      return;
-    }
     if (!state.connected || !state.peerOnline) return toast('对方当前不在线');
     $('actionTray').hidden = true;
     sendEvent(button.dataset.action);
@@ -692,8 +727,8 @@ async function init() {
     if (action === 'settings') { setExpanded(true); setView('connection'); }
     if (action === 'show') setExpanded(state.connected ? state.expanded : true);
   });
-  $('openButton').addEventListener('click', () => setExpanded(true));
-  $('collapseButton').addEventListener('click', () => setExpanded(false));
+  $('openButton').addEventListener('click', () => { setView('chat'); setExpanded(true); });
+  $('collapseButton').addEventListener('click', returnFromSettings);
   $('chatTab').addEventListener('click', () => setView('chat'));
   $('connectionTab').addEventListener('click', () => setView('connection'));
   $('disconnectButton').addEventListener('click', disconnect);

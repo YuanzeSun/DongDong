@@ -13,12 +13,35 @@
 .window.compact .context-menu { -webkit-app-region: no-drag; }
 .window.compact .companion-main { height: auto; min-height: 0; flex: 1; }
 .window.compact .mascot-button { margin-bottom: 5px; }
+.mascot-button { cursor: grab; touch-action: none; }
+.mascot-button:active { cursor: grabbing; }
 .window.compact .compact-actions {
   height: 55px; min-height: 55px; padding: 4px 5px 6px; margin: 0 8px 5px;
   background: transparent; border: 0; border-radius: 0;
   box-shadow: none;
 }
 .window.compact .floor-shadow { bottom: 1px; }
+.window.compact .speech,
+.window.compact .couple-badge,
+.window.compact .compact-actions,
+.window.compact .floor-shadow {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .18s ease, visibility .18s ease;
+}
+.speech:empty { display: none; }
+.window.compact .companion-main:hover .speech,
+.window.compact .companion-main:hover .couple-badge,
+.window.compact .companion-main:hover .compact-actions,
+.window.compact .companion-main:hover .floor-shadow,
+.window.compact:focus-within .speech,
+.window.compact:focus-within .couple-badge,
+.window.compact:focus-within .compact-actions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 .window.peeked .speech,
 .window.peeked .couple-badge,
 .window.peeked .floor-shadow,
@@ -30,7 +53,11 @@
 .context-menu button { display: block; width: 100%; padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: #3b6354; text-align: left; font-size: 11px; font-weight: 700; }
 .context-menu button:hover { background: #e4f3eb; color: #b85446; }
 .app-settings { flex: 1; padding: 26px 28px; overflow: auto; }
-.app-settings h1 { margin: 0 0 8px; color: #27483c; font-size: 22px; }
+.settings-heading { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.app-settings h1 { margin: 0; color: #27483c; font-size: 22px; }
+.view-back-button { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 8px 0 5px; border:1px solid #cfe2d7; border-radius:6px; background:#f4faf6; color:#397461; font-size:11px; font-weight:750; }
+.view-back-button:hover { background:#e5f4ec; color:#b85446; }
+.view-back-button img { width:15px; height:15px; }
 .settings-intro { margin: 0 0 22px; color: #789185; font-size: 12px; }
 .app-settings .setting-row { margin-top: 0; border-top: 0; border-bottom: 1px solid #e6eee9; }
 .app-settings .text-button { margin-top: 22px; }
@@ -72,6 +99,9 @@
 .care-button { color:#b65b56; }
 .care-button img { filter:invert(40%) sepia(29%) saturate(1100%) hue-rotate(320deg); }
 .action-tray { grid-template-columns:repeat(4,1fr); }
+.return-button { display:inline-flex; align-items:center; gap:5px; width:auto; min-width:92px; padding:0 8px; color:#397461; font-size:11px; font-weight:750; }
+.return-button img { width:15px; height:15px; }
+.return-button:hover { background:#e5f4ec; color:#b85446; }
 .mascot.hug { animation:hug-cat .9s ease-in-out 2; }
 .mascot.kiss { animation:kiss-cat .8s ease-in-out 2; }
 .mascot.groom { animation:groom-cat .7s ease-in-out 3; }

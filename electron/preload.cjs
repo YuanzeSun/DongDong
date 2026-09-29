@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('petDesktop', {
   startHost: (address, senderId) => ipcRenderer.invoke('start-host', address, senderId),
   stopHost: () => ipcRenderer.invoke('stop-host'),
   setWindowSize: expanded => ipcRenderer.invoke('window-size', expanded),
+  moveWindow: (dx, dy) => ipcRenderer.send('move-window', dx, dy),
   setPeeked: peeked => ipcRenderer.invoke('set-peeked', peeked),
   setPinned: pinned => ipcRenderer.invoke('set-pin', pinned),
   startWalk: () => ipcRenderer.invoke('start-walk'),
