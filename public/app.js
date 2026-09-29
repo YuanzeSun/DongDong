@@ -7,9 +7,10 @@ localStorage.setItem('dongdong-sender-id-v3', senderId);
 const state = {
   mode: 'host', url: '', key: '', token: '', name: '', socket: null,
   connected: false, expanded: false, pinned: true, view: 'chat', peerOnline: false,
-  peerName: '对方', peerStatus: 'offline', status: 'available', profile: {},
+  peerName: '对方', profile: {},
   reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, pose: 'idle',
   idleActions: JSON.parse(localStorage.getItem('dongdong-idle-actions') ?? 'true'),
+  peeked: false,
   notifications: JSON.parse(localStorage.getItem('dongdong-notifications') ?? 'true')
 };
 const seenEvents = new Set();
@@ -17,6 +18,9 @@ let poseTimer;
 let napTimer;
 let blinkTimer;
 let walkFrameTimer;
+let peekTimer;
+let deliveryFinishTimer;
+const pendingDeliveries = new Map();
 
 function speak(message, kind = 'normal') {
   $('speech').textContent = message;
@@ -65,16 +69,46 @@ function scheduleNap() {
   }, state.peerOnline ? 45000 : 250);
 }
 
+function schedulePeek() {
+  clearTimeout(peekTimer);
+  if (!state.connected || state.expanded || state.walking || state.peeked) return;
+  peekTimer = setTimeout(() => {
+    if (!state.connected || state.expanded || state.walking || state.peeked) return schedulePeek();
+    state.peeked = true;
+    $('window').classList.add('peeked');
+    desktop?.setPeeked(true);
+  }, 70000 + Math.random() * 50000);
+}
+
+function unpeek() {
+  clearTimeout(peekTimer);
+  if (!state.peeked) return;
+  state.peeked = false;
+  $('window').classList.remove('peeked');
+  desktop?.setPeeked(false);
+  schedulePeek();
+}
+
 function scheduleIdleAction() {
   clearTimeout(state.idleTimer);
-  if (!state.connected || !state.peerOnline || state.walking || !state.idleActions) return;
+  if (!state.connected || !state.peerOnline || state.walking || state.peeked || !state.idleActions) return;
   state.idleTimer = setTimeout(() => {
     if (!state.connected || !state.peerOnline || state.walking || state.pose !== 'idle') return scheduleIdleAction();
-    const action = ['blink', 'happy', 'wiggle'][Math.floor(Math.random() * 3)];
+    const action = ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'nap', 'walk'][Math.floor(Math.random() * 7)];
     if (action === 'blink') {
       setPose('blink');
       speak('喵？');
       setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, 260);
+    } else if (action === 'walk' && desktop) {
+      speak('悄悄出来走两步…');
+      desktop.startWalk();
+    } else if (action === 'nap') {
+      setPose('nap');
+      speak('趴一会儿…');
+      setTimeout(() => { if (state.connected && state.pose === 'nap') setPose('idle'); }, 2600);
+    } else if (['sit', 'stretch'].includes(action)) {
+      setPose(action);
+      setTimeout(() => { if (state.connected && state.pose === action) setPose('idle'); }, 1800);
     } else {
       animatePet(action);
     }
@@ -86,10 +120,8 @@ function setPeerOnline(online) {
   const presence = typeof online === 'object' ? online : { online };
   state.peerOnline = Boolean(presence.online);
   state.peerName = presence.peerName || state.peerName || '对方';
-  state.peerStatus = presence.peerStatus || (state.peerOnline ? 'available' : 'offline');
   desktop?.setOnline(state.peerOnline);
-  const statusLabel = { available: '在线陪伴', busy: '忙碌中', away: '暂时离开', offline: '离线' }[state.peerStatus] || '在线';
-  $('presenceText').textContent = state.peerOnline ? `${state.peerName} · ${statusLabel}` : `${state.peerName} 离线，小猫正在休息`;
+  $('presenceText').textContent = state.peerOnline ? `${state.peerName} 在线` : `${state.peerName} 离线，小猫正在休息`;
   $('presenceDot').classList.toggle('online', state.peerOnline);
   $('presenceDot').classList.toggle('offline', !state.peerOnline);
   if (state.peerOnline) {
@@ -114,23 +146,38 @@ function animatePet(kind = 'happy') {
 
 function animateDelivery(progress = 1) {
   clearTimeout(poseTimer);
+  clearTimeout(deliveryFinishTimer);
   const pet = $('mainMascot');
   setPose('idle');
   pet.classList.remove('delivery');
   void pet.offsetWidth;
   pet.style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, progress))));
   pet.classList.add('delivery');
-  poseTimer = setTimeout(() => { pet.classList.remove('delivery'); setPose(state.peerOnline ? 'idle' : 'nap'); }, 1700);
+  deliveryFinishTimer = setTimeout(() => { pet.classList.remove('delivery'); setPose(state.peerOnline ? 'idle' : 'nap'); }, 2600);
 }
 
 function animateReceive() {
   clearTimeout(poseTimer);
+  clearTimeout(deliveryFinishTimer);
   const pet = $('mainMascot');
   setPose('idle');
   pet.classList.remove('receive');
   void pet.offsetWidth;
   pet.classList.add('receive');
   poseTimer = setTimeout(() => { pet.classList.remove('receive'); setPose(state.peerOnline ? 'idle' : 'nap'); }, 1600);
+}
+
+function localAction(kind) {
+  clearTimeout(poseTimer);
+  if (kind === 'sleep') {
+    setPose('nap');
+    speak('我家的小猫睡一会儿…');
+    return;
+  }
+  setPose(kind);
+  const duration = kind === 'purr' ? 2600 : 1800;
+  poseTimer = setTimeout(() => setPose(state.peerOnline ? 'idle' : 'nap'), duration);
+  speak({ pet: '摸摸我家的猫', fish: '给我家的猫一条小鱼干' }[kind] || '我家的猫做了个小动作');
 }
 
 function animateRemoteAction(kind) {
@@ -160,10 +207,12 @@ function setMode(mode) {
 
 function setExpanded(expanded) {
   state.expanded = expanded;
+  if (expanded) unpeek();
   $('window').classList.toggle('compact', !expanded);
   $('expanded').hidden = !expanded;
   $('compactActions').hidden = expanded;
   const resized = desktop?.setWindowSize(expanded);
+  if (!expanded) schedulePeek();
   if (expanded) setTimeout(() => $('messageInput').focus(), 100);
   return resized;
 }
@@ -220,13 +269,10 @@ async function request(route, options = {}) {
 }
 
 function applyProfile(profile = {}) {
-  state.profile = { petName: '咚咚', anniversary: '', note: '', ...profile };
+  state.profile = { petName: '咚咚', ...profile };
   $('petNameLabel').textContent = state.profile.petName || '咚咚';
-  $('anniversaryLabel').textContent = state.profile.anniversary ? `♡ ${state.profile.anniversary}` : '';
   $('coupleBadge').hidden = !state.connected;
   $('profilePetName').value = state.profile.petName || '';
-  $('profileAnniversary').value = state.profile.anniversary || '';
-  $('profileNote').value = state.profile.note || '';
 }
 
 async function openSession(url, key, name, mode) {
@@ -310,6 +356,7 @@ function onEvent(event) {
       const data = event.data || {};
       const name = data.name || String(event.text || '').split('|')[0] || '一封信';
       const progress = Number(data.progress ?? String(event.text || '').split('|')[1] ?? 0) / 100;
+      pendingDeliveries.set(event.senderId, Date.now());
       animateDelivery(progress);
       speak(`${event.senderName} 正在递来 ${name} · ${Math.round(progress * 100)}%`);
     }
@@ -321,7 +368,11 @@ function onEvent(event) {
     const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
     const message = event.kind === 'file' ? `收到文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 来打招呼啦` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : event.text;
     speak(message, actionText[event.kind] ? 'alert' : 'normal');
-    if (event.kind === 'file' || event.kind === 'message') animateReceive();
+    if (event.kind === 'file' || event.kind === 'message') {
+      const started = pendingDeliveries.get(event.senderId);
+      pendingDeliveries.delete(event.senderId);
+      setTimeout(animateReceive, started ? Math.max(0, 650 - (Date.now() - started)) : 0);
+    }
     else if (event.kind === 'walk' && desktop) desktop.startWalk();
     else if (event.kind === 'wave') animatePet('wiggle');
     else if (actionText[event.kind]) animateRemoteAction(event.kind);
@@ -401,6 +452,7 @@ async function connect(url, key, name, mode) {
     setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, 170);
   }, 6800);
   scheduleIdleAction();
+  schedulePeek();
   openSocket();
   localStorage.setItem(SESSION_KEY, JSON.stringify({ url: state.url, key: state.key, name: state.name, mode }));
 }
@@ -414,6 +466,9 @@ async function disconnect() {
   clearTimeout(napTimer);
   clearInterval(blinkTimer);
   clearTimeout(state.idleTimer);
+  clearTimeout(peekTimer);
+  state.peeked = false;
+  $('window').classList.remove('peeked');
   clearTimeout(state.reconnectTimer);
   state.socket?.close();
   state.socket = null;
@@ -434,8 +489,7 @@ async function disconnect() {
 
 async function sendEvent(kind, text = '', data = {}) {
   try {
-    if (kind === 'message') animateDelivery(0);
-    await request('/events', {
+    const response = await request('/events', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind, text, data, clientId: crypto.randomUUID() })
     });
@@ -444,7 +498,22 @@ async function sendEvent(kind, text = '', data = {}) {
     } else if (kind === 'walk') speak('已经让对方散步啦', 'alert');
     else if (kind === 'jump') speak('已经让对方乱蹦啦', 'alert');
     else if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(kind)) speak('动作送到对方那里啦', 'alert');
-  } catch (error) { toast(error.message); }
+    return await response.json();
+  } catch (error) { toast(error.message); return null; }
+}
+
+async function sendMessage(text) {
+  const transferId = crypto.randomUUID();
+  animateDelivery(0);
+  if (!await sendEvent('delivery', '', { transferId, name: text.slice(0, 180), progress: 0, status: 'preparing' })) return;
+  speak('叼着信出发啦');
+  await new Promise(resolve => setTimeout(resolve, 380));
+  await sendEvent('delivery', '', { transferId, name: text.slice(0, 180), progress: 55, status: 'walking' });
+  await new Promise(resolve => setTimeout(resolve, 480));
+  await sendEvent('delivery', '', { transferId, name: text.slice(0, 180), progress: 100, status: 'at-window' });
+  await new Promise(resolve => setTimeout(resolve, 280));
+  await sendEvent('message', text);
+  speak('信送到窗口啦', 'alert');
 }
 
 async function sendFile(file) {
@@ -525,8 +594,8 @@ async function init() {
     $('pinButton').classList.toggle('unpinned', !state.pinned);
   });
   $('mascotButton').addEventListener('click', () => {
-    if (!state.connected || !state.peerOnline) return toast('对方当前不在线');
-    sendEvent('pet');
+    unpeek();
+    localAction('pet');
   });
   $('mascotButton').addEventListener('contextmenu', event => {
     if (!state.connected) return;
@@ -539,6 +608,8 @@ async function init() {
   });
   $('contextSettings').addEventListener('click', () => { $('contextMenu').hidden = true; setExpanded(true); setView('connection'); });
   $('contextDisconnect').addEventListener('click', () => { $('contextMenu').hidden = true; disconnect(); });
+  $('mascotButton').addEventListener('mouseenter', unpeek);
+  $('mascotButton').addEventListener('focus', unpeek);
   document.addEventListener('click', event => { if (!event.target.closest('#contextMenu')) $('contextMenu').hidden = true; });
   $('waveButton').addEventListener('click', () => sendEvent('wave'));
   $('careButton').addEventListener('click', () => {
@@ -547,11 +618,20 @@ async function init() {
   });
   $('actionMenuButton').addEventListener('click', () => { $('actionTray').hidden = !$('actionTray').hidden; });
   document.querySelectorAll('.action-choice').forEach(button => button.addEventListener('click', () => {
+    if (button.dataset.target === 'local') {
+      $('actionTray').hidden = true;
+      localAction(button.dataset.action);
+      return;
+    }
     if (!state.connected || !state.peerOnline) return toast('对方当前不在线');
     $('actionTray').hidden = true;
     sendEvent(button.dataset.action);
   }));
   if (desktop) desktop.onWalkState(onWalkState);
+  if (desktop?.onPeekState) desktop.onPeekState(peeked => {
+    state.peeked = Boolean(peeked);
+    $('window').classList.toggle('peeked', state.peeked);
+  });
   if (desktop?.onMenuAction) desktop.onMenuAction(action => {
     if (action === 'settings') { setExpanded(true); setView('connection'); }
     if (action === 'show') setExpanded(state.connected ? state.expanded : true);
@@ -564,13 +644,9 @@ async function init() {
   $('openDownloadsButton').addEventListener('click', () => desktop?.openDownloads());
   $('copyAddress').addEventListener('click', () => copy(state.url));
   $('copyKey').addEventListener('click', () => copy(state.key));
-  $('presenceStatus').addEventListener('change', async event => {
-    try { await request('/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: event.target.value }) }); }
-    catch (error) { toast(error.message); }
-  });
   $('saveProfileButton').addEventListener('click', async () => {
     try {
-      const response = await request('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ petName: $('profilePetName').value.trim(), anniversary: $('profileAnniversary').value, note: $('profileNote').value.trim() }) });
+      const response = await request('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ petName: $('profilePetName').value.trim() }) });
       applyProfile(await response.json());
       toast('共享资料已更新');
     } catch (error) { toast(error.message); }
@@ -584,10 +660,7 @@ async function init() {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
-    (async () => {
-      await sendEvent('delivery', '', { transferId: crypto.randomUUID(), name: text.slice(0, 180), progress: 0, status: 'preparing' });
-      await sendEvent('message', text);
-    })();
+    sendMessage(text);
   });
 
   let dragDepth = 0;

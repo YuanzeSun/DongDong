@@ -33,6 +33,7 @@ test('v3 sessions authenticate, pair one guest, personalize presence, and publis
     assert.equal((await fetch(`${ctx.base}/api/session`, { method: 'POST', headers: { 'X-Pet-Key': 'bad', 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
     const host = await ctx.session('host', 'host', '甲');
     const guest = await ctx.session('guest', 'join', '乙');
+    assert.equal('peerStatus' in host.presence, false);
     const thirdResponse = await fetch(`${ctx.base}/api/session`, { method: 'POST', headers: { 'X-Pet-Key': 'test-secret', 'Content-Type': 'application/json' }, body: JSON.stringify({ senderId: 'third', senderName: '丙', mode: 'join' }) });
     assert.equal(thirdResponse.status, 409);
 
@@ -41,7 +42,9 @@ test('v3 sessions authenticate, pair one guest, personalize presence, and publis
     const hostPresence = waitFor(hostSocket, message => message.type === 'presence' && message.online);
     const guestSocket = new WebSocket(`${ctx.base.replace(/^http/, 'ws')}/ws?v=3&session=${guest.token}`);
     await new Promise((resolve, reject) => { guestSocket.once('open', resolve); guestSocket.once('error', reject); });
-    assert.equal((await hostPresence).peerName, '乙');
+    const presence = await hostPresence;
+    assert.equal(presence.peerName, '乙');
+    assert.equal('peerStatus' in presence, false);
     const guestEvent = waitFor(guestSocket, message => message.type === 'event');
     const sent = await fetch(`${ctx.base}/api/events`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'message', text: '晚安', senderId: 'spoof', senderName: '伪造', clientId: 'm1' }) });
     assert.equal(sent.status, 201); const event = await sent.json(); assert.equal(event.senderId, 'host'); assert.equal(event.senderName, '甲');
@@ -75,13 +78,13 @@ test('actions require an online peer; delivery is transient and structured; file
   } finally { await closeRoom(ctx); }
 });
 
-test('profile/status persist and guest leave releases pairing; reconnect keeps identity and history excludes actions', async () => {
+test('profile persists and guest leave releases pairing; reconnect keeps identity and history excludes actions', async () => {
   const ctx = await setup('hello-pet-reconnect-');
   try {
     const host = await ctx.session('host', 'host', '甲'); let guest = await ctx.session('guest', 'join', '乙');
+    assert.equal((await fetch(`${ctx.base}/api/status`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'busy' }) })).status, 404);
     const profile = await fetch(`${ctx.base}/api/profile`, { headers: { 'X-Pet-Session': host.token } }); assert.equal(profile.status, 200);
-    const updated = await fetch(`${ctx.base}/api/profile`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ petName: '小咪', anniversary: '2026-01-02', note: 'hello' }) }); assert.equal((await updated.json()).petName, '小咪');
-    assert.equal((await fetch(`${ctx.base}/api/status`, { method: 'POST', headers: { 'X-Pet-Session': guest.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'busy' }) })).status, 200);
+    const updated = await fetch(`${ctx.base}/api/profile`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ petName: '小咪' }) }); assert.equal((await updated.json()).petName, '小咪');
     assert.equal((await fetch(`${ctx.base}/api/events`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'message', text: 'persist' }) })).status, 201);
     assert.equal((await fetch(`${ctx.base}/api/leave`, { method: 'POST', headers: { 'X-Pet-Session': guest.token } })).status, 204);
     const reconnect = await ctx.session('guest', 'join', '乙'); assert.equal(reconnect.senderId, 'guest');

@@ -11,10 +11,25 @@ const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 else {
-  let window; let tray; let room; let walkTimer; let isQuitting = false; let isOnline = true;
+  let window; let tray; let room; let walkTimer; let isQuitting = false; let isOnline = true; let peeked = false;
   const savedDownloads = new Set(); const menuListeners = new Set();
   const sendMenuAction = action => { for (const listener of menuListeners) listener(action); };
   function stopWalk() { if (walkTimer) clearInterval(walkTimer); walkTimer = null; if (window && !window.isDestroyed()) window.webContents.send('walk-state', false); }
+  function setPeeked(next) {
+    if (!window || window.isDestroyed()) return false;
+    peeked = Boolean(next);
+    const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
+    if (peeked) {
+      const width = 138; const height = 176;
+      const rightSide = bounds.x + bounds.width / 2 >= area.x + area.width / 2;
+      const x = rightSide ? area.x + area.width - width : area.x;
+      window.setBounds(clampBounds({ x, y: Math.max(area.y, area.y + area.height - height - 36), width, height }, area));
+    } else {
+      window.setBounds(clampBounds({ x: bounds.x, y: bounds.y, width: 300, height: 340 }, area));
+    }
+    window.webContents.send('peek-state', peeked);
+    return peeked;
+  }
   function clampWindow() { if (!window || window.isDestroyed()) return; const area = screen.getDisplayMatching(window.getBounds()).workArea; window.setBounds(clampBounds(window.getBounds(), area)); }
   function startWalk() {
     if (!isOnline || !window || window.isDestroyed()) return false; stopWalk();
@@ -42,9 +57,10 @@ else {
     ipcMain.handle('addresses', () => tailscaleAddresses());
     ipcMain.handle('start-host', async (_event, requestedAddress, senderId) => { const address = tailscaleAddresses().find(item => item.address === requestedAddress)?.address; if (!address) throw new Error('没有找到这个 Tailscale 地址，请确认 Tailscale 已连接'); if (room) await room.close(); room = createRoom({ host: address, port: PORT, key: getKey(), hostId: String(senderId || ''), dataDir: path.join(app.getPath('userData'), 'room-v3'), staticDir: path.join(__dirname, '..', 'public') }); try { await room.listen(); } catch (error) { room = null; throw error; } return { url: `http://${address}:${PORT}`, key: getKey() }; });
     ipcMain.handle('stop-host', async () => { if (room) await room.close(); room = null; });
-    ipcMain.handle('window-size', (_event, expanded) => { if (!window || window.isDestroyed()) return; if (expanded) stopWalk(); const [width, height] = expanded ? [420, 700] : [300, 340]; const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea; window.setBounds(clampBounds({ x: bounds.x + bounds.width - width, y: bounds.y + bounds.height - height, width, height }, area)); });
+    ipcMain.handle('window-size', (_event, expanded) => { if (!window || window.isDestroyed()) return; if (expanded) stopWalk(); if (peeked) setPeeked(false); const [width, height] = expanded ? [420, 700] : [300, 340]; const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea; window.setBounds(clampBounds({ x: bounds.x + bounds.width - width, y: bounds.y + bounds.height - height, width, height }, area)); });
     ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', () => startWalk()); ipcMain.handle('stop-walk', () => stopWalk());
     ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) stopWalk(); return isOnline; }); ipcMain.handle('set-ignore-mouse-events', (_event, ignore, options = {}) => window?.setIgnoreMouseEvents(Boolean(ignore), { forward: options.forward !== false }));
+    ipcMain.handle('set-peeked', (_event, next) => setPeeked(next));
     ipcMain.handle('copy', (_event, value) => clipboard.writeText(String(value).slice(0, 500))); ipcMain.handle('get-downloads-path', () => app.getPath('downloads'));
     ipcMain.handle('save-download', async (_event, data, requestedName) => { const savedPath = await saveUniqueDownload(app.getPath('downloads'), downloadBuffer(data, MAX_DOWNLOAD_BYTES), requestedName); savedDownloads.add(path.resolve(savedPath)); return savedPath; });
     ipcMain.handle('reveal-download', async (_event, requestedPath) => { const resolved = path.resolve(String(requestedPath || '')); if (!savedDownloads.has(resolved)) throw new Error('只能打开本次保存的文件'); await shell.showItemInFolder(resolved); return true; }); ipcMain.handle('open-downloads', () => shell.openPath(app.getPath('downloads')));

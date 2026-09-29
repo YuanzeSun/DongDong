@@ -11,7 +11,6 @@ const MAX_EVENTS = 300;
 const PROTOCOL_VERSION = '3';
 const EVENT_KINDS = new Set(['message', 'wave', 'walk', 'jump', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'delivery', 'hug', 'kiss', 'groom', 'purr']);
 const ACTION_KINDS = new Set([...EVENT_KINDS].filter(kind => kind !== 'message'));
-const STATUS_VALUES = new Set(['available', 'busy', 'away']);
 
 function stringValue(value, max) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function normalizeFileName(value, explicit = false) {
@@ -41,12 +40,12 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
   const historyPath = path.join(dataDir, 'history.json');
   const pairingPath = path.join(dataDir, 'pairing.json');
   const profilePath = path.join(dataDir, 'profile.json');
-  const defaultProfile = { petName: '咚咚', anniversary: '', note: '' };
+  const defaultProfile = { petName: '咚咚' };
   let events = readJson(historyPath, []);
   if (!Array.isArray(events)) events = [];
   events = events.filter(event => event && (event.kind === 'message' || event.kind === 'file')).slice(-MAX_EVENTS);
   let profile = { ...defaultProfile, ...(readJson(profilePath, {}) || {}) };
-  profile = { petName: stringValue(profile.petName, 80) || defaultProfile.petName, anniversary: stringValue(profile.anniversary, 80), note: stringValue(profile.note, 1000) };
+  profile = { petName: stringValue(profile.petName, 80) || defaultProfile.petName };
   const savedPairing = readJson(pairingPath, {});
   let pairedGuest = savedPairing && typeof savedPairing.guestId === 'string' ? { id: savedPairing.guestId, name: stringValue(savedPairing.guestName, 24) || '对方' } : null;
 
@@ -80,7 +79,7 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
   const tokenFrom = req => req.get('x-pet-session') || '';
   const peerFor = session => [...sessions.values()].find(item => item.senderId !== session.senderId);
   const activePeer = session => [...sockets.clients].some(socket => socket.readyState === 1 && socket.session && socket.session.senderId !== session.senderId);
-  const presenceFor = session => { const peer = peerFor(session); return { online: Boolean(peer && activePeer(session)), peerName: peer?.senderName || '', peerStatus: peer?.status || 'away' }; };
+  const presenceFor = session => { const peer = peerFor(session); return { online: Boolean(peer && activePeer(session)), peerName: peer?.senderName || '' }; };
   const sendPresence = () => { for (const socket of sockets.clients) if (socket.readyState === 1 && socket.session) { const presence = presenceFor(socket.session); socket.send(JSON.stringify({ type: 'presence', ...presence, presence })); } };
   const sendProfile = () => { const wire = JSON.stringify({ type: 'profile', profile }); for (const socket of sockets.clients) if (socket.readyState === 1) socket.send(wire); };
   function broadcastEvent(event, persist = true) {
@@ -106,7 +105,7 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
     if (!senderId || !['host', 'join'].includes(mode) || !stringValue(req.body?.senderName, 24)) return res.status(400).json({ error: '会话信息无效' });
     if (mode === 'host') { if (expectedHostId && senderId !== expectedHostId) return res.status(403).json({ error: '主机身份不匹配' }); if (!expectedHostId) expectedHostId = senderId; }
     else { if (pairedGuest && pairedGuest.id !== senderId) return res.status(409).json({ error: '房间已有另一位访客' }); if (!pairedGuest) { pairedGuest = { id: senderId, name: senderName }; persistPairing(); } else if (pairedGuest.name !== senderName) { pairedGuest.name = senderName; persistPairing(); } }
-    const token = crypto.randomBytes(32).toString('base64url'); const session = { token, senderId, senderName, mode, status: 'available', createdAt: Date.now(), lastSeen: Date.now() };
+    const token = crypto.randomBytes(32).toString('base64url'); const session = { token, senderId, senderName, mode, createdAt: Date.now(), lastSeen: Date.now() };
     sessions.set(token, session); sendPresence();
     res.status(201).json({ token, senderId, senderName, mode, profile, presence: presenceFor(session) });
   });
@@ -135,10 +134,9 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
   app.post('/api/profile', express.json({ limit: '8kb' }), (req, res) => {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) return res.status(400).json({ error: '资料无效' });
     const next = { ...profile };
-    for (const field of ['petName', 'anniversary', 'note']) if (req.body[field] !== undefined) { if (typeof req.body[field] !== 'string') return res.status(400).json({ error: '资料无效' }); next[field] = req.body[field].trim().normalize('NFC').slice(0, field === 'note' ? 1000 : 80); }
+    if (req.body.petName !== undefined) { if (typeof req.body.petName !== 'string') return res.status(400).json({ error: '资料无效' }); next.petName = req.body.petName.trim().normalize('NFC').slice(0, 80); }
     if (!next.petName) return res.status(400).json({ error: '宠物名称不能为空' }); profile = next; persistProfile(); sendProfile(); res.json(profile);
   });
-  app.post('/api/status', express.json({ limit: '2kb' }), (req, res) => { if (!STATUS_VALUES.has(req.body?.status)) return res.status(400).json({ error: '状态无效' }); req.session.status = req.body.status; sendPresence(); res.json({ status: req.body.status }); });
   app.post('/api/leave', (req, res) => {
     const session = req.session; sessions.delete(session.token);
     if (session.mode === 'join' && pairedGuest?.id === session.senderId) { pairedGuest = null; persistPairing(); for (const [token, item] of sessions) if (item.mode === 'join' && item.senderId === session.senderId) sessions.delete(token); for (const socket of sockets.clients) if (socket.session?.senderId === session.senderId) socket.close(1000, 'left'); }

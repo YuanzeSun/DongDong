@@ -1,6 +1,6 @@
 {
   "name": "hello-pet",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "A little desktop companion for two computers on Tailscale",
   "main": "electron/main.cjs",
@@ -9,8 +9,8 @@
     "preview": "node scripts/preview.cjs",
     "test": "node --test tests/*.test.cjs",
     "assets": "node scripts/make-icon.cjs",
-    "dist:mac": "npm run assets && electron-builder --mac pkg --arm64 --publish never",
-    "dist:mac:x64": "npm run assets && electron-builder --mac pkg --x64 --publish never",
+    "dist:mac": "npm run assets && electron-builder --mac dmg --arm64 --publish never",
+    "dist:mac:x64": "npm run assets && electron-builder --mac dmg --x64 --publish never",
     "dist:win": "npm run assets && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
@@ -34,8 +34,8 @@
     "mac": {
       "category": "public.app-category.social-networking",
       "icon": "assets/icon.icns",
-      "target": ["pkg"],
-      "artifactName": "Dongdong-${version}-${arch}.pkg"
+      "target": ["dmg"],
+      "artifactName": "Dongdong-${version}-${arch}.dmg"
     },
     "win": { "target": ["nsis"], "icon": "assets/icon.ico" },
     "nsis": {

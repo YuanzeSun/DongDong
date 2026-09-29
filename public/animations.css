@@ -57,8 +57,9 @@
 
 /* Delivery uses an in-stage translate rather than moving the desktop window. */
 .mascot.delivery {
-  --delivery-distance: 38px;
+  --delivery-distance: 120px;
   translate: calc((var(--delivery-progress, 1) - .5) * var(--delivery-distance)) 0;
+  transition: translate .42s cubic-bezier(.2,.8,.3,1);
   animation: delivery-step .62s steps(2, end) infinite;
 }
 .mascot.delivery::before {

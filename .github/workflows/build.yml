@@ -16,11 +16,11 @@ jobs:
           - runner: macos-latest
             command: dist:mac
             artifact: dongdong-macos-arm64
-            archive: release/*.pkg
+            archive: release/*.dmg
           - runner: macos-latest
             command: dist:mac:x64
             artifact: dongdong-macos-x64
-            archive: release/*.pkg
+            archive: release/*.dmg
           - runner: windows-latest
             command: dist:win
             artifact: dongdong-windows

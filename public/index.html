@@ -58,7 +58,7 @@
     <section class="companion" id="companion" hidden>
       <div class="companion-main">
         <div class="speech" id="speech">点击我，打个招呼吧</div>
-        <div class="couple-badge" id="coupleBadge" hidden><span id="petNameLabel">咚咚</span><span id="anniversaryLabel"></span></div>
+        <div class="couple-badge" id="coupleBadge" hidden><span id="petNameLabel">咚咚</span></div>
         <button class="mascot-button" id="mascotButton" title="摸摸咚咚" aria-label="摸摸咚咚"><span class="mascot" id="mainMascot"></span></button>
         <span class="floor-shadow"></span>
         <div class="context-menu" id="contextMenu" hidden>
@@ -74,17 +74,19 @@
         <button class="action-button" id="quickFileButton" title="发送文件"><img src="./icons/paperclip.svg" alt=""><span>文件</span></button>
       </div>
       <div class="action-tray" id="actionTray" hidden>
-        <button class="action-choice" data-action="pet"><span>🤍</span>摸摸猫</button>
-        <button class="action-choice" data-action="fish"><span>🐟</span>小鱼干</button>
-        <button class="action-choice" data-action="walk"><img src="./icons/footprints.svg" alt="">散步</button>
-        <button class="action-choice" data-action="sit"><span>🪑</span>坐下</button>
-        <button class="action-choice" data-action="sleep"><span>💤</span>睡觉</button>
-        <button class="action-choice" data-action="stretch"><span>☀</span>伸懒腰</button>
-        <button class="action-choice" data-action="jump"><img src="./icons/sparkles.svg" alt="">乱蹦</button>
-        <button class="action-choice" data-action="hug"><span>🫂</span>抱抱</button>
-        <button class="action-choice" data-action="kiss"><span>💋</span>亲亲</button>
-        <button class="action-choice" data-action="groom"><span>🧶</span>梳毛</button>
-        <button class="action-choice" data-action="purr"><span>💗</span>呼噜</button>
+        <button class="action-choice local-action" data-action="pet" data-target="local"><span>🤍</span>摸摸这只</button>
+        <button class="action-choice remote-action" data-action="pet" data-target="remote"><span>🤍</span>摸摸那只</button>
+        <button class="action-choice local-action" data-action="fish" data-target="local"><span>🐟</span>喂我家猫</button>
+        <button class="action-choice remote-action" data-action="fish" data-target="remote"><span>🐟</span>给你家猫</button>
+        <button class="action-choice remote-action" data-action="walk" data-target="remote"><img src="./icons/footprints.svg" alt="">叫它散步</button>
+        <button class="action-choice remote-action" data-action="sit" data-target="remote"><span>🪑</span>坐一会儿</button>
+        <button class="action-choice remote-action" data-action="sleep" data-target="remote"><span>💤</span>睡一会儿</button>
+        <button class="action-choice remote-action" data-action="stretch" data-target="remote"><span>☀</span>伸个懒腰</button>
+        <button class="action-choice remote-action" data-action="jump" data-target="remote"><img src="./icons/sparkles.svg" alt="">蹦跶一下</button>
+        <button class="action-choice remote-action" data-action="hug" data-target="remote"><span>🫂</span>抱一下</button>
+        <button class="action-choice remote-action" data-action="kiss" data-target="remote"><span>💋</span>亲一下</button>
+        <button class="action-choice remote-action" data-action="groom" data-target="remote"><span>🧶</span>梳梳毛</button>
+        <button class="action-choice remote-action" data-action="purr" data-target="remote"><span>💗</span>听呼噜</button>
       </div>
       <div class="expanded" id="expanded" hidden>
         <div class="tabs" role="tablist" aria-label="房间视图">
@@ -109,11 +111,8 @@
           <div class="shared-profile">
             <h3>你们的小窝</h3>
             <label>小猫昵称<input id="profilePetName" maxlength="24" placeholder="例如：橘子"></label>
-            <label>纪念日<input id="profileAnniversary" type="date"></label>
-            <label>给对方的一句话<textarea id="profileNote" maxlength="180" rows="2" placeholder="今天也要好好吃饭呀"></textarea></label>
             <button class="secondary-button" id="saveProfileButton" type="button">保存共享资料</button>
           </div>
-          <label class="setting-row status-row" for="presenceStatus"><span><strong>我的状态</strong><small>对方会看到这个状态</small></span><select id="presenceStatus"><option value="available">在线陪伴</option><option value="busy">忙碌中</option><option value="away">暂时离开</option></select></label>
           <label class="setting-row" for="autoLaunchToggle"><span><strong>开机自启动</strong><small>登录系统后自动打开咚咚</small></span><input type="checkbox" id="autoLaunchToggle"></label>
           <button class="text-button" id="openDownloadsButton" type="button">打开下载文件夹</button>
           <button class="text-button disconnect-button" id="disconnectButton">退出房间</button>
