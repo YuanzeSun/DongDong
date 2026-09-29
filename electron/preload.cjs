@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('petDesktop', {
   stopWalk: () => ipcRenderer.invoke('stop-walk'),
   onWalkState: callback => ipcRenderer.on('walk-state', (_event, walking) => callback(walking)),
   copy: value => ipcRenderer.invoke('copy', value),
+  saveDownload: (data, name) => ipcRenderer.invoke('save-download', data, name),
+  getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
+  setAutoLaunch: enabled => ipcRenderer.invoke('set-auto-launch', enabled),
   notify: (title, body) => ipcRenderer.invoke('notify', title, body),
   close: () => ipcRenderer.invoke('close-window')
 });

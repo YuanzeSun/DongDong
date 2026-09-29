@@ -2,18 +2,47 @@
 .mascot.nap { animation: breathing 2.4s ease-in-out infinite; }
 .window.compact { background: transparent; border: 0; box-shadow: none; }
 .window.compact .titlebar {
-  height: 35px; min-height: 35px; margin: 5px 8px 0; padding: 0 8px;
-  background: #fafffcf0; border: 1px solid #dbe8df; border-radius: 7px;
-  box-shadow: 0 4px 12px #20483120;
+  height: 30px; min-height: 30px; margin: 2px 8px 0; padding: 0 8px;
+  background: transparent; border: 0; border-radius: 0;
+  box-shadow: none;
 }
 .window.compact .companion-main { height: auto; min-height: 0; flex: 1; }
 .window.compact .mascot-button { margin-bottom: 5px; }
 .window.compact .compact-actions {
-  height: 58px; min-height: 58px; padding: 4px 8px 6px; margin: 0 8px 8px;
-  background: #fafffcf0; border: 1px solid #dbe8df; border-radius: 7px;
-  box-shadow: 0 4px 12px #20483120;
+  height: 55px; min-height: 55px; padding: 4px 5px 6px; margin: 0 8px 5px;
+  background: transparent; border: 0; border-radius: 0;
+  box-shadow: none;
 }
 .window.compact .floor-shadow { bottom: 1px; }
+.window.compact .status { text-shadow: 0 1px 3px #ffffff; }
+.context-menu { position: absolute; min-width: 118px; z-index: 12; padding: 4px; background: #fbfffcf7; border: 1px solid #d6e7dc; border-radius: 7px; box-shadow: 0 8px 22px #20483135; }
+.context-menu button { display: block; width: 100%; padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: #3b6354; text-align: left; font-size: 11px; font-weight: 700; }
+.context-menu button:hover { background: #e4f3eb; color: #b85446; }
+.app-settings { flex: 1; padding: 26px 28px; overflow: auto; }
+.app-settings h1 { margin: 0 0 8px; color: #27483c; font-size: 22px; }
+.settings-intro { margin: 0 0 22px; color: #789185; font-size: 12px; }
+.app-settings .setting-row { margin-top: 0; border-top: 0; border-bottom: 1px solid #e6eee9; }
+.app-settings .text-button { margin-top: 22px; }
+.action-tray { position: absolute; left: 7px; right: 7px; bottom: 57px; z-index: 8; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 8px; background: #fbfffcf5; border: 1px solid #dbe8df; border-radius: 8px; box-shadow: 0 8px 22px #2048312b; }
+.action-choice { min-width: 0; height: 43px; padding: 3px 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; border-radius: 5px; background: #edf7f1; color: #3c6756; font-size: 10px; font-weight: 700; }
+.action-choice:hover { background: #dff1e7; color: #b85446; }
+.action-choice span { font-size: 15px; line-height: 17px; }
+.action-choice img { width: 16px; height: 16px; }
+.mascot { position: relative; }
+.mascot.delivery { animation: carry-envelope .62s ease-in-out infinite; }
+.mascot.delivery::after { content: "✉"; position: absolute; left: 50%; bottom: 24px; color: #d86f58; font-size: 22px; line-height: 1; text-shadow: 0 1px #fff; transform: translateX(-50%); }
+.mascot.receive { animation: receive-envelope .45s ease-in-out 3; }
+.mascot.receive::after { content: "✉"; position: absolute; left: 50%; bottom: 28px; color: #d86f58; font-size: 22px; line-height: 1; text-shadow: 0 1px #fff; transform: translateX(-50%) rotate(-8deg); animation: envelope-pop .45s ease-in-out 3; }
+.mascot.pet::after { content: "♥"; position: absolute; right: 21px; top: 25px; color: #e47e6c; font-size: 21px; animation: heart-pop .7s ease-in-out 2; }
+.mascot.fish::after { content: "🐟"; position: absolute; left: 50%; bottom: 25px; font-size: 20px; transform: translateX(-50%); animation: fish-pop .75s ease-in-out 2; }
+.mascot.sit { transform: translateY(12px) scaleY(.83); transform-origin: bottom center; }
+.mascot.stretch { animation: stretch-cat .9s ease-in-out 2; }
+@keyframes carry-envelope { 0%, 100% { transform: translateX(-3px) translateY(0) rotate(-2deg); } 50% { transform: translateX(3px) translateY(-5px) rotate(2deg); } }
+@keyframes receive-envelope { 0%, 100% { transform: translateX(0); } 45% { transform: translateX(9px) rotate(3deg); } }
+@keyframes envelope-pop { 0%, 100% { opacity: .35; transform: translateX(-50%) scale(.75) rotate(-8deg); } 55% { opacity: 1; transform: translateX(-50%) scale(1.2) rotate(8deg); } }
+@keyframes heart-pop { 0%, 100% { opacity: .25; transform: translateY(5px) scale(.7); } 50% { opacity: 1; transform: translateY(-5px) scale(1.1); } }
+@keyframes fish-pop { 0%, 100% { opacity: .25; transform: translate(-50%, 5px) rotate(-8deg); } 50% { opacity: 1; transform: translate(-50%, -8px) rotate(8deg); } }
+@keyframes stretch-cat { 0%, 100% { transform: scale(1, 1); } 45% { transform: scale(1.13, .9) translateY(6px); } }
 @keyframes breathing {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.025, .985); }

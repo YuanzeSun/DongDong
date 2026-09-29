@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { promises: fsp } = require('node:fs');
 const { createRoom } = require('../server/room.cjs');
 
 let window;
@@ -45,7 +46,12 @@ function tailscaleAddresses() {
   );
 }
 
-function configPath() { return path.join(app.getPath('userData'), 'room-config.json'); }
+function configPath() { return path.join(app.getPath('userData'), 'room-config-v2.json'); }
+
+function downloadName(value) {
+  const name = path.basename(String(value || 'file').replaceAll('\\', '/')).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').trim();
+  return name || 'file';
+}
 function getKey() {
   try {
     const key = JSON.parse(fs.readFileSync(configPath(), 'utf8')).key;
@@ -80,7 +86,7 @@ app.whenReady().then(() => {
     if (room) await room.close();
     room = createRoom({
       host: address, port: PORT, key: getKey(),
-      dataDir: path.join(app.getPath('userData'), 'room'),
+      dataDir: path.join(app.getPath('userData'), 'room-v2'),
       staticDir: path.join(__dirname, '..', 'public')
     });
     try { await room.listen(); }
@@ -104,6 +110,22 @@ app.whenReady().then(() => {
   ipcMain.handle('start-walk', () => startWalk());
   ipcMain.handle('stop-walk', () => stopWalk());
   ipcMain.handle('copy', (_event, value) => clipboard.writeText(String(value).slice(0, 500)));
+  ipcMain.handle('save-download', async (_event, data, requestedName) => {
+    const fileName = downloadName(requestedName);
+    const downloads = app.getPath('downloads');
+    const extension = path.extname(fileName);
+    const stem = extension ? fileName.slice(0, -extension.length) : fileName;
+    let target = path.join(downloads, fileName);
+    let index = 1;
+    while (fs.existsSync(target)) target = path.join(downloads, `${stem} (${index++})${extension}`);
+    await fsp.writeFile(target, Buffer.from(data));
+    return target;
+  });
+  ipcMain.handle('get-auto-launch', () => app.getLoginItemSettings().openAtLogin);
+  ipcMain.handle('set-auto-launch', (_event, enabled) => {
+    app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true });
+    return app.getLoginItemSettings().openAtLogin;
+  });
   ipcMain.handle('notify', (_event, title, body) => {
     if (Notification.isSupported()) new Notification({ title: String(title), body: String(body).slice(0, 140) }).show();
   });

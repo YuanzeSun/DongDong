@@ -16,6 +16,7 @@
       <div class="title-actions">
         <span class="status" id="status">待连接</span>
         <button class="icon-button desktop-only" id="pinButton" title="取消置顶" aria-label="切换置顶" hidden><img src="./icons/pin.svg" alt=""></button>
+        <button class="icon-button" id="settingsButton" title="设置" aria-label="打开设置"><img src="./icons/settings.svg" alt=""></button>
         <button class="icon-button desktop-only" id="closeButton" title="关闭" aria-label="关闭"><img src="./icons/x.svg" alt=""></button>
       </div>
     </header>
@@ -44,22 +45,42 @@
       <p class="feedback" id="setupFeedback" role="alert"></p>
     </section>
 
+    <section class="app-settings" id="appSettings" hidden>
+      <h1>应用设置</h1>
+      <p class="settings-intro">调整咚咚的启动方式和桌宠体验。</p>
+      <label class="setting-row" for="autoLaunchSetup"><span><strong>开机自启动</strong><small>登录系统后自动打开咚咚</small></span><input type="checkbox" id="autoLaunchSetup"></label>
+      <button class="text-button" id="settingsBackButton">返回连接</button>
+    </section>
+
     <section class="companion" id="companion" hidden>
       <div class="companion-main">
         <div class="speech" id="speech">点击我，打个招呼吧</div>
         <button class="mascot-button" id="mascotButton" title="摸摸咚咚" aria-label="摸摸咚咚"><span class="mascot" id="mainMascot"></span></button>
         <span class="floor-shadow"></span>
+        <div class="context-menu" id="contextMenu" hidden>
+          <button id="contextSettings">房间设置</button>
+          <button id="contextDisconnect">退出房间</button>
+        </div>
       </div>
       <div class="compact-actions" id="compactActions">
         <button class="action-button wave-button" id="waveButton" title="向对方招手"><img src="./icons/hand.svg" alt=""><span>招手</span></button>
-        <button class="action-button desktop-only" id="walkButton" title="让小猫散步"><img src="./icons/footprints.svg" alt=""><span id="walkLabel">散步</span></button>
+        <button class="action-button" id="actionMenuButton" title="更多动作"><img src="./icons/sparkles.svg" alt=""><span>动作</span></button>
         <button class="action-button" id="openButton" title="展开消息"><img src="./icons/message-circle.svg" alt=""><span>消息</span></button>
         <button class="action-button" id="quickFileButton" title="发送文件"><img src="./icons/paperclip.svg" alt=""><span>文件</span></button>
+      </div>
+      <div class="action-tray" id="actionTray" hidden>
+        <button class="action-choice" data-action="pet"><span>🤍</span>摸摸猫</button>
+        <button class="action-choice" data-action="fish"><span>🐟</span>小鱼干</button>
+        <button class="action-choice" data-action="walk"><img src="./icons/footprints.svg" alt="">散步</button>
+        <button class="action-choice" data-action="sit"><span>🪑</span>坐下</button>
+        <button class="action-choice" data-action="sleep"><span>💤</span>睡觉</button>
+        <button class="action-choice" data-action="stretch"><span>☀</span>伸懒腰</button>
+        <button class="action-choice" data-action="jump"><img src="./icons/sparkles.svg" alt="">乱蹦</button>
       </div>
       <div class="expanded" id="expanded" hidden>
         <div class="tabs" role="tablist" aria-label="房间视图">
           <button class="selected" id="chatTab" role="tab" aria-selected="true">对话</button>
-          <button id="connectionTab" role="tab" aria-selected="false">连接</button>
+          <button id="connectionTab" role="tab" aria-selected="false">设置</button>
           <button class="collapse-button" id="collapseButton" title="收起小窗" aria-label="收起小窗"><img src="./icons/chevron-down.svg" alt=""></button>
         </div>
         <div id="chatView" class="chat-view">
@@ -71,10 +92,13 @@
           </form>
         </div>
         <div id="connectionView" class="connection-view" hidden>
+          <h2 class="settings-title">房间设置</h2>
+          <div class="presence-card"><span class="presence-dot" id="presenceDot"></span><span id="presenceText">正在检查对方状态…</span></div>
           <p class="connection-label">房间地址</p><div class="copy-line"><code id="roomAddress"></code><button class="icon-button copy-button" id="copyAddress" title="复制地址" aria-label="复制地址"><img src="./icons/copy.svg" alt=""></button></div>
           <div id="hostKeyBlock"><p class="connection-label">配对码</p><div class="copy-line"><code id="roomKey"></code><button class="icon-button copy-button" id="copyKey" title="复制配对码" aria-label="复制配对码"><img src="./icons/copy.svg" alt=""></button></div></div>
-          <p class="connection-hint">把地址和配对码发给对方。文件保存在创建房间的电脑上。</p>
-          <button class="text-button" id="disconnectButton">断开连接</button>
+          <p class="connection-hint">把地址和配对码发给对方。收到的文件会保存到本机“下载”文件夹。</p>
+          <label class="setting-row" for="autoLaunchToggle"><span><strong>开机自启动</strong><small>登录系统后自动打开咚咚</small></span><input type="checkbox" id="autoLaunchToggle"></label>
+          <button class="text-button disconnect-button" id="disconnectButton">退出房间</button>
         </div>
       </div>
     </section>

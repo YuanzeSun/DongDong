@@ -8,6 +8,15 @@ const http = require('node:http');
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_EVENTS = 300;
+const PROTOCOL_VERSION = '2';
+const EVENT_KINDS = new Set(['message', 'wave', 'walk', 'jump', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'delivery']);
+
+function normalizeFileName(value) {
+  const original = path.basename(String(value || '').replaceAll('\\', '/')).slice(0, 180) || 'file';
+  const decoded = Buffer.from(original, 'latin1').toString('utf8');
+  if (!decoded.includes('\uFFFD') && /[\u4e00-\u9fff]/.test(decoded) && !/[\u4e00-\u9fff]/.test(original)) return decoded.slice(0, 180);
+  return original;
+}
 
 function createRoom({ host, port = 4827, key, dataDir, staticDir }) {
   if (!host || !key || !dataDir || !staticDir) throw new Error('Room configuration is incomplete');
@@ -51,13 +60,15 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir }) {
     next();
   });
 
-  function publish(event) {
-    events.push(event);
-    while (events.length > MAX_EVENTS) {
-      const removed = events.shift();
-      if (removed.kind === 'file') fs.rm(path.join(fileDir, removed.fileId), { force: true }, () => {});
+  function publish(event, { persist = true } = {}) {
+    if (persist) {
+      events.push(event);
+      while (events.length > MAX_EVENTS) {
+        const removed = events.shift();
+        if (removed.kind === 'file') fs.rm(path.join(fileDir, removed.fileId), { force: true }, () => {});
+      }
+      fs.writeFileSync(historyPath, JSON.stringify(events, null, 2));
     }
-    fs.writeFileSync(historyPath, JSON.stringify(events, null, 2));
     const wire = JSON.stringify({ type: 'event', event });
     for (const socket of sockets.clients) {
       if (socket.readyState === 1) socket.send(wire);
@@ -65,20 +76,28 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir }) {
     return event;
   }
 
+  function publishPresence() {
+    const online = [...sockets.clients].filter(socket => socket.readyState === 1).length === 2;
+    const wire = JSON.stringify({ type: 'presence', online });
+    for (const socket of sockets.clients) {
+      if (socket.readyState === 1) socket.send(wire);
+    }
+  }
+
   app.get('/api/events', (_req, res) => res.json(events));
   app.post('/api/events', express.json({ limit: '8kb' }), (req, res) => {
     const kind = req.body?.kind;
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    if (!['message', 'wave'].includes(kind) || (kind === 'message' && (!text || text.length > 1000))) {
+    if (!EVENT_KINDS.has(kind) || (kind === 'message' && (!text || text.length > 1000))) {
       return res.status(400).json({ error: '消息内容无效' });
     }
     const event = publish({
       id: crypto.randomUUID(), kind,
-      text: kind === 'wave' ? '' : text,
+      text: kind === 'message' ? text : '',
       senderId: String(req.body?.senderId || '').slice(0, 80),
       senderName: String(req.body?.senderName || '对方').trim().slice(0, 24) || '对方',
       createdAt: new Date().toISOString()
-    });
+    }, { persist: kind !== 'delivery' });
     res.status(201).json(event);
   });
 
@@ -88,7 +107,7 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir }) {
   });
   app.post('/api/files', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: '请选择文件' });
-    const originalName = path.basename(req.file.originalname.replaceAll('\\', '/')).slice(0, 180) || 'file';
+    const originalName = normalizeFileName(req.file.originalname);
     const event = publish({
       id: crypto.randomUUID(), kind: 'file',
       fileId: req.file.filename, fileName: originalName, size: req.file.size,
@@ -113,12 +132,25 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir }) {
 
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url, `http://${host}`);
-    if (url.pathname !== '/ws' || url.searchParams.get('key') !== key) {
+    if (url.pathname !== '/ws' || url.searchParams.get('v') !== PROTOCOL_VERSION || url.searchParams.get('key') !== key || !url.searchParams.get('senderId') || !['host', 'join'].includes(url.searchParams.get('mode'))) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
     }
+    if ([...sockets.clients].filter(item => item.readyState === 1).length >= 2) {
+      socket.write('HTTP/1.1 409 Conflict\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n房间只允许一对一连接');
+      socket.destroy();
+      return;
+    }
     sockets.handleUpgrade(request, socket, head, ws => sockets.emit('connection', ws, request));
+  });
+
+  sockets.on('connection', (socket, request) => {
+    const url = new URL(request.url, `http://${host}`);
+    socket.senderId = url.searchParams.get('senderId');
+    socket.mode = url.searchParams.get('mode');
+    publishPresence();
+    socket.on('close', publishPresence);
   });
 
   return {
