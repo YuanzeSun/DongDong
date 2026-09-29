@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7faf8">
+  <title>咚咚 · 桌面传送门</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./pet.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <main class="window" id="window">
+    <header class="titlebar">
+      <div class="brand"><span class="brand-mark">✦</span><span>咚咚</span></div>
+      <div class="title-actions">
+        <span class="status" id="status">待连接</span>
+        <button class="icon-button desktop-only" id="pinButton" title="取消置顶" aria-label="切换置顶" hidden><img src="./icons/pin.svg" alt=""></button>
+        <button class="icon-button desktop-only" id="closeButton" title="关闭" aria-label="关闭"><img src="./icons/x.svg" alt=""></button>
+      </div>
+    </header>
+
+    <section class="setup" id="setup">
+      <div class="setup-art">
+        <div class="mascot small" id="setupMascot" aria-hidden="true"></div>
+        <span class="orbit-dot dot-a"></span><span class="orbit-dot dot-b"></span>
+      </div>
+      <h1>连接房间</h1>
+      <div class="segmented" role="tablist" aria-label="连接方式">
+        <button id="hostTab" class="selected" role="tab" aria-selected="true">创建房间</button>
+        <button id="joinTab" role="tab" aria-selected="false">加入房间</button>
+      </div>
+      <form id="hostForm" class="setup-form">
+        <label>你的名字<input id="hostName" maxlength="24" autocomplete="nickname" placeholder="给对方看的名字" required></label>
+        <label>Tailscale 地址<select id="hostAddress" required></select></label>
+        <button class="primary-button" type="submit">开启房间 <img src="./icons/arrow-right.svg" alt=""></button>
+      </form>
+      <form id="joinForm" class="setup-form" hidden>
+        <label>你的名字<input id="joinName" maxlength="24" autocomplete="nickname" placeholder="给对方看的名字" required></label>
+        <label>对方的 Tailscale 地址<input id="joinAddress" inputmode="url" placeholder="100.x.y.z" required></label>
+        <label>配对码<input id="joinKey" autocomplete="off" spellcheck="false" placeholder="从对方那里获取" required></label>
+        <button class="primary-button" type="submit">加入房间 <img src="./icons/arrow-right.svg" alt=""></button>
+      </form>
+      <p class="feedback" id="setupFeedback" role="alert"></p>
+    </section>
+
+    <section class="companion" id="companion" hidden>
+      <div class="companion-main">
+        <div class="speech" id="speech">点击我，打个招呼吧</div>
+        <button class="mascot-button" id="mascotButton" title="摸摸咚咚" aria-label="摸摸咚咚"><span class="mascot" id="mainMascot"></span></button>
+        <span class="floor-shadow"></span>
+      </div>
+      <div class="compact-actions" id="compactActions">
+        <button class="action-button wave-button" id="waveButton" title="向对方招手"><img src="./icons/hand.svg" alt=""><span>招手</span></button>
+        <button class="action-button desktop-only" id="walkButton" title="让小猫散步"><img src="./icons/footprints.svg" alt=""><span id="walkLabel">散步</span></button>
+        <button class="action-button" id="openButton" title="展开消息"><img src="./icons/message-circle.svg" alt=""><span>消息</span></button>
+        <button class="action-button" id="quickFileButton" title="发送文件"><img src="./icons/paperclip.svg" alt=""><span>文件</span></button>
+      </div>
+      <div class="expanded" id="expanded" hidden>
+        <div class="tabs" role="tablist" aria-label="房间视图">
+          <button class="selected" id="chatTab" role="tab" aria-selected="true">对话</button>
+          <button id="connectionTab" role="tab" aria-selected="false">连接</button>
+          <button class="collapse-button" id="collapseButton" title="收起小窗" aria-label="收起小窗"><img src="./icons/chevron-down.svg" alt=""></button>
+        </div>
+        <div id="chatView" class="chat-view">
+          <div class="events" id="events" aria-live="polite"></div>
+          <form class="composer" id="messageForm">
+            <button type="button" class="icon-button attach-button" id="fileButton" title="发送文件" aria-label="发送文件"><img src="./icons/paperclip.svg" alt=""></button>
+            <input id="messageInput" maxlength="1000" placeholder="写一句话…" aria-label="消息内容" autocomplete="off">
+            <button class="send-button" type="submit" title="发送" aria-label="发送"><img src="./icons/arrow-up.svg" alt=""></button>
+          </form>
+        </div>
+        <div id="connectionView" class="connection-view" hidden>
+          <p class="connection-label">房间地址</p><div class="copy-line"><code id="roomAddress"></code><button class="icon-button copy-button" id="copyAddress" title="复制地址" aria-label="复制地址"><img src="./icons/copy.svg" alt=""></button></div>
+          <div id="hostKeyBlock"><p class="connection-label">配对码</p><div class="copy-line"><code id="roomKey"></code><button class="icon-button copy-button" id="copyKey" title="复制配对码" aria-label="复制配对码"><img src="./icons/copy.svg" alt=""></button></div></div>
+          <p class="connection-hint">把地址和配对码发给对方。文件保存在创建房间的电脑上。</p>
+          <button class="text-button" id="disconnectButton">断开连接</button>
+        </div>
+      </div>
+    </section>
+    <div class="drop-overlay" id="dropOverlay" hidden><img src="./icons/file-up.svg" alt=""><span>松开发送文件</span></div>
+    <input id="fileInput" type="file" hidden>
+    <div class="toast" id="toast" role="status" hidden></div>
+  </main>
+</body>
+</html>

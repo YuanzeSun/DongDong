@@ -1,0 +1,21 @@
+.mascot { image-rendering: pixelated; }
+.mascot.nap { animation: breathing 2.4s ease-in-out infinite; }
+.window.compact { background: transparent; border: 0; box-shadow: none; }
+.window.compact .titlebar {
+  height: 35px; min-height: 35px; margin: 5px 8px 0; padding: 0 8px;
+  background: #fafffcf0; border: 1px solid #dbe8df; border-radius: 7px;
+  box-shadow: 0 4px 12px #20483120;
+}
+.window.compact .companion-main { height: auto; min-height: 0; flex: 1; }
+.window.compact .mascot-button { margin-bottom: 5px; }
+.window.compact .compact-actions {
+  height: 58px; min-height: 58px; padding: 4px 8px 6px; margin: 0 8px 8px;
+  background: #fafffcf0; border: 1px solid #dbe8df; border-radius: 7px;
+  box-shadow: 0 4px 12px #20483120;
+}
+.window.compact .floor-shadow { bottom: 1px; }
+@keyframes breathing {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.025, .985); }
+}
+@media (prefers-reduced-motion: reduce) { .mascot.nap { animation: none; } }

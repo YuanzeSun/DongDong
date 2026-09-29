@@ -1,0 +1,5 @@
+node_modules/
+release/
+assets/*.icns
+assets/*.ico
+.DS_Store

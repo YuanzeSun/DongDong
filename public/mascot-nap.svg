@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" shape-rendering="crispEdges" aria-label="打盹的像素橘猫">
+  <path d="M28 22h5v-3h3v2h2v6h-2v3h-4v-3h3v-4h-3v2h-4z" fill="#60402e"/>
+  <path d="M30 23h3v-2h2v2h1v4h-2v2h-1v-3h2v-4h-2v2h-3z" fill="#d17a3a"/>
+  <path d="M7 18V9h5v4h7v5h2v3h8v2h3v3h2v5h-3v3H8v-2H5v-3H3v-7h2v-4z" fill="#60402e"/>
+  <path d="M8 11h3v5h8v3h2v3h8v2h3v3h1v3h-3v3H9v-2H6v-3H5v-5h2v-5h1z" fill="#ee9b4f"/>
+  <path d="M9 12h2v5H9z" fill="#df8878"/>
+  <path d="M9 20h10v2h2v4H7v-4h2z" fill="#f6b76c"/>
+  <path d="M11 27h8v3h-8z" fill="#ffe9c0"/>
+  <path d="M14 19h2v2h-2zm-4 4h4v1h-4z" fill="#5a3c2e"/>
+  <path d="M7 25h2v2H7z" fill="#a35c50"/>
+  <path d="M23 25h3v4h-3zm5 2h2v3h-2z" fill="#d17a3a"/>
+  <path d="M11 31h7v2h-7zm11 0h6v2h-6z" fill="#f8c27b"/>
+  <path d="M10 18h3v2h-3zm15 7h3v2h-3z" fill="#d17a3a"/>
+</svg>
