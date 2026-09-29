@@ -16,7 +16,7 @@ jobs:
           - runner: macos-latest
             command: dist:mac
             artifact: dongdong-macos
-            archive: release/*.app.zip
+            archive: release/*.dmg
           - runner: windows-latest
             command: dist:win
             artifact: dongdong-windows
