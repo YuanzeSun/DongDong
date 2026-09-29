@@ -16,11 +16,11 @@ jobs:
           - runner: macos-latest
             command: dist:mac
             artifact: dongdong-macos
-            archive: release/*-mac.zip
+            archive: release/*.app.zip
           - runner: windows-latest
             command: dist:win
             artifact: dongdong-windows
-            archive: release/*-win.zip
+            archive: release/*.exe
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -56,4 +56,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/*.zip --title "Dongdong $TAG" --generate-notes
+        run: gh release create "$TAG" dist/* --title "Dongdong $TAG" --generate-notes

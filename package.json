@@ -1,6 +1,6 @@
 {
   "name": "hello-pet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A little desktop companion for two computers on Tailscale",
   "main": "electron/main.cjs",
@@ -10,7 +10,7 @@
     "test": "node --test tests/*.test.cjs",
     "assets": "node scripts/make-icon.cjs",
     "dist:mac": "npm run assets && electron-builder --mac zip --arm64 --publish never",
-    "dist:win": "npm run assets && electron-builder --win zip --x64 --publish never"
+    "dist:win": "npm run assets && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -30,7 +30,18 @@
     "asar": true,
     "files": ["electron/**/*", "public/**/*", "server/**/*", "assets/icon.png", "package.json"],
     "directories": { "output": "release" },
-    "mac": { "category": "public.app-category.social-networking", "icon": "assets/icon.icns" },
-    "win": { "target": ["zip"], "icon": "assets/icon.ico" }
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "icon": "assets/icon.icns",
+      "artifactName": "Dongdong-${version}-${arch}.app.zip"
+    },
+    "win": { "target": ["nsis"], "icon": "assets/icon.ico" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "Dongdong-${version}-Setup.${ext}"
+    }
   }
 }
