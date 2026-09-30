@@ -1,5 +1,4 @@
-/* Small, composable action layer for the mascot. The sprite remains still
-   while an action is active; motion is limited to the mascot's own stage. */
+/* Legacy sprite fallback and delivery effects. The rig drives normal action frames. */
 .mascot {
   transform-origin: 50% 88%;
   will-change: transform;

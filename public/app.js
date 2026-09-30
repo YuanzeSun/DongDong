@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 const desktop = window.petDesktop;
 const panelKind = desktop?.panelKind || '';
 const panelMode = panelKind === 'chat' || panelKind === 'settings';
+const catAnimator = !panelMode && window.PixelCatAnimator ? new window.PixelCatAnimator($('mainMascot')) : null;
 const DEFAULT_PET_NAME = '小橘';
 const SESSION_KEY = 'dongdong-session-v3';
 const senderId = localStorage.getItem('dongdong-sender-id-v3') || crypto.randomUUID();
@@ -87,6 +88,7 @@ function setPose(pose) {
     'walk-1': 'mascot-walk-1', 'walk-2': 'mascot-walk-2'
   }[pose] || 'mascot';
   pet.style.backgroundImage = `url('./${sprite}.svg')`;
+  catAnimator?.play(pose);
   if (pose === 'wave') pet.classList.add('wiggle');
   if (pose === 'happy') pet.classList.add('happy');
   if (pose === 'nap' || pose === 'sleep') pet.classList.add('nap', 'sleep');
@@ -101,12 +103,13 @@ function wakeThen(callback) {
   pet.classList.remove('waking');
   void pet.offsetWidth;
   pet.classList.add('waking');
+  catAnimator?.play('wake');
   wakeTimer = setTimeout(() => {
     const ready = wakeCallback;
     wakeTimer = null;
     setPose('idle');
     ready?.();
-  }, 240);
+  }, 600);
 }
 
 function transitionPose(pose, onReady = () => {}) {
@@ -215,15 +218,15 @@ function scheduleIdleAction() {
     const action = ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'nap', 'walk'][Math.floor(Math.random() * 7)];
     if (action === 'blink') {
       setPose('blink');
-      setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, 260);
+      setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, catAnimator?.durationFor('blink') || 260);
     } else if (action === 'walk' && desktop) {
-      desktop.startWalk();
+      startMotion('walk');
     } else if (action === 'nap') {
       setPose('nap');
       setTimeout(() => { if (state.connected && state.pose === 'nap') setPose('idle'); }, 2600);
     } else if (['sit', 'stretch'].includes(action)) {
       setPose(action);
-      setTimeout(() => { if (state.connected && state.pose === action) setPose('idle'); }, 1800);
+      setTimeout(() => { if (state.connected && state.pose === action) setPose('idle'); }, (catAnimator?.durationFor(action) || 1800) + 80);
     } else {
       animatePet(action);
     }
@@ -258,7 +261,7 @@ function animatePet(kind = 'happy') {
   const target = kind === 'wiggle' ? 'wave' : 'happy';
   transitionPose(target, () => {
     if (epoch !== actionEpoch) return;
-    poseTimer = setTimeout(() => transitionPose(state.peerOnline ? 'idle' : 'nap'), 1500);
+    poseTimer = setTimeout(() => transitionPose(state.peerOnline ? 'idle' : 'nap'), (catAnimator?.durationFor(target) || 1500) + 80);
   });
   if (state.peerOnline) scheduleNap();
 }
@@ -273,11 +276,15 @@ function animateDelivery(progress = 1) {
   wakeThen(() => {
     if (epoch !== actionEpoch) return;
     const pet = $('mainMascot');
-    setPose('idle');
-    pet.classList.remove('delivery');
-    void pet.offsetWidth;
+    const continuing = pet.classList.contains('delivery') && catAnimator?.action === 'delivery';
+    if (!continuing) {
+      setPose('idle');
+      pet.classList.remove('delivery');
+      void pet.offsetWidth;
+      pet.classList.add('delivery');
+      catAnimator?.play('delivery');
+    }
     pet.style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, progress))));
-    pet.classList.add('delivery');
     deliveryFinishTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('delivery'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, 2600);
   });
 }
@@ -296,7 +303,8 @@ function animateReceive() {
     pet.classList.remove('receive');
     void pet.offsetWidth;
     pet.classList.add('receive');
-    poseTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('receive'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, 1600);
+    catAnimator?.play('receive');
+    poseTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('receive'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, (catAnimator?.durationFor('receive') || 1600) + 80);
   });
 }
 
@@ -314,7 +322,7 @@ function animateRemoteAction(kind) {
     if (epoch !== actionEpoch) return;
     poseTimer = setTimeout(() => {
       if (epoch === actionEpoch) transitionPose(state.peerOnline ? 'idle' : 'nap');
-    }, kind === 'jump' ? 2200 : 1800);
+    }, kind === 'purr' ? 3400 : (catAnimator?.durationFor(kind) || 1800) + 80);
   });
 }
 
@@ -736,7 +744,7 @@ async function connect(url, key, name, mode) {
   blinkTimer = setInterval(() => {
     if (!state.connected || state.walking || state.pose !== 'idle') return;
     setPose('blink');
-    setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, 170);
+    setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, catAnimator?.durationFor('blink') || 170);
   }, 6800);
   scheduleIdleAction();
   schedulePeek();
