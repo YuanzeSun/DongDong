@@ -23,6 +23,92 @@
 .mascot.happy,
 .mascot.jump { animation: mascot-jump .86s cubic-bezier(.2,.85,.3,1) 2; }
 
+/* Readable action cues keep the small pixel sprite legible without turning it
+   into a sticker: sleep has drifting Zs, while a jump has lift-off sparkles
+   and a soft landing puff. */
+.mascot.nap::before,
+.mascot.nap::after,
+.mascot.jump::before,
+.mascot.jump::after,
+.mascot.sit::after,
+.mascot.stretch::before,
+.mascot.groom::before,
+.mascot.purr::before {
+  position: absolute;
+  pointer-events: none;
+  font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  font-weight: 800;
+  line-height: 1;
+  z-index: 2;
+}
+.mascot.nap::before {
+  content: "Z";
+  right: 8px;
+  top: -6px;
+  color: #6e8f83;
+  font-size: 14px;
+  animation: sleep-z 2.8s ease-in-out infinite;
+}
+.mascot.nap::after {
+  content: "z  z";
+  right: -4px;
+  top: -1px;
+  color: #8eaaa0;
+  font-size: 10px;
+  animation: sleep-z 2.8s .7s ease-in-out infinite;
+}
+.mascot.jump::before {
+  content: "✦";
+  right: 2px;
+  top: 0;
+  color: #e7a156;
+  font-size: 14px;
+  animation: jump-spark .86s ease-out 2;
+}
+.mascot.jump::after {
+  content: "·  ·  ·";
+  left: 50%;
+  bottom: -7px;
+  color: #a77b67;
+  font-size: 10px;
+  letter-spacing: 2px;
+  transform: translateX(-50%);
+  animation: jump-dust .86s ease-out 2;
+}
+.mascot.sit::after {
+  content: "⌣";
+  left: 50%;
+  bottom: -4px;
+  color: #6aa087;
+  font-size: 18px;
+  transform: translateX(-50%);
+  opacity: .8;
+}
+.mascot.stretch::before {
+  content: "✦";
+  left: 3px;
+  top: -4px;
+  color: #e7a156;
+  font-size: 13px;
+  animation: stretch-spark 1.05s ease-in-out 2;
+}
+.mascot.groom::before {
+  content: "✦";
+  right: 1px;
+  top: 19px;
+  color: #e7a156;
+  font-size: 11px;
+  animation: groom-spark 1.05s ease-in-out 3;
+}
+.mascot.purr::before {
+  content: "〰";
+  right: -2px;
+  top: 16px;
+  color: #74a792;
+  font-size: 16px;
+  animation: purr-wave 1.25s ease-in-out infinite;
+}
+
 .mascot.sit,
 .mascot.groom,
 .mascot.purr { transform-origin: 50% 100%; }
@@ -177,6 +263,33 @@
   58% { transform: translateY(-24px) rotate(4deg); }
   76% { transform: translateY(-5px) rotate(2deg); }
   88% { transform: translateY(1px) rotate(0); }
+}
+@keyframes sleep-z {
+  0%, 100% { opacity: .35; transform: translate(2px, 5px) scale(.82); }
+  45% { opacity: 1; transform: translate(0, -2px) scale(1); }
+  75% { opacity: .65; transform: translate(-2px, -8px) scale(1.08); }
+}
+@keyframes jump-spark {
+  0%, 100% { opacity: 0; transform: translate(-2px, 8px) scale(.65) rotate(-15deg); }
+  40% { opacity: 1; transform: translate(1px, -3px) scale(1.1) rotate(8deg); }
+  72% { opacity: .55; transform: translate(4px, -8px) scale(.9) rotate(20deg); }
+}
+@keyframes jump-dust {
+  0%, 100% { opacity: 0; transform: translateX(-50%) scale(.6); }
+  25% { opacity: .2; transform: translateX(-50%) scale(.7); }
+  78% { opacity: .85; transform: translateX(-50%) scale(1.15); }
+}
+@keyframes stretch-spark {
+  0%, 100% { opacity: 0; transform: translate(5px, 5px) scale(.7); }
+  45% { opacity: 1; transform: translate(0, -2px) scale(1.1); }
+}
+@keyframes groom-spark {
+  0%, 100% { opacity: 0; transform: translate(2px, 3px) scale(.65); }
+  45% { opacity: 1; transform: translate(-1px, -2px) scale(1.05); }
+}
+@keyframes purr-wave {
+  0%, 100% { opacity: .25; transform: translateX(2px) scale(.8); }
+  50% { opacity: 1; transform: translateX(-1px) scale(1.05); }
 }
 @keyframes action-heart {
   0% { opacity: .2; transform: translateY(4px) scale(.72); }

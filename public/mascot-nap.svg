@@ -6,7 +6,10 @@
   <path d="M9 12h2v5H9z" fill="#df8878"/>
   <path d="M9 20h10v2h2v4H7v-4h2z" fill="#f6b76c"/>
   <path d="M11 27h8v3h-8z" fill="#ffe9c0"/>
-  <path d="M14 19h2v2h-2zm-4 4h4v1h-4z" fill="#5a3c2e"/>
+  <!-- Closed eyelids and a tiny relaxed mouth make the sleeping pose read at
+       the same scale as the standing sprite. -->
+  <path d="M12 19h4v1h-4zm10 0h4v1h-4z" fill="#5a3c2e"/>
+  <path d="M18 22h4v1h-4z" fill="#a35c50"/>
   <path d="M7 25h2v2H7z" fill="#a35c50"/>
   <path d="M23 25h3v4h-3zm5 2h2v3h-2z" fill="#d17a3a"/>
   <path d="M11 31h7v2h-7zm11 0h6v2h-6z" fill="#f8c27b"/>
