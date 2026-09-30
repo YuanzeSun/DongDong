@@ -189,7 +189,7 @@ function animatePet(kind = 'happy') {
   void pet.offsetWidth;
   pet.classList.add(kind === 'jump' ? 'jump' : kind);
   poseTimer = setTimeout(() => setPose(state.peerOnline ? 'idle' : 'nap'), kind === 'jump' ? 2200 : 1500);
-  scheduleNap();
+  if (state.peerOnline) scheduleNap();
 }
 
 function animateDelivery(progress = 1) {
@@ -226,6 +226,37 @@ function animateRemoteAction(kind) {
   void pet.offsetWidth;
   pet.classList.add(kind);
   poseTimer = setTimeout(() => setPose(state.peerOnline ? 'idle' : 'nap'), kind === 'jump' ? 2200 : 1800);
+}
+
+function animateLocalAction(kind) {
+  if (kind === 'walk') {
+    if (desktop) desktop.startWalk();
+    else animateRemoteAction('happy');
+    return;
+  }
+  if (kind === 'wave') {
+    animatePet('wiggle');
+    return;
+  }
+  if (kind === 'care') {
+    animatePet('happy');
+    return;
+  }
+  animateRemoteAction(kind);
+}
+
+async function triggerAction(kind) {
+  // The remote cat is the source of truth while connected. When the peer is
+  // away, keep the interaction responsive locally without creating a server
+  // event that cannot be delivered.
+  unpeek(true);
+  if (!state.connected || !state.peerOnline) {
+    animateLocalAction(kind);
+    toast(state.connected ? '对方当前不在线' : '还没有连接房间');
+    return null;
+  }
+  if (kind === 'care') return sendEvent('message', '今天也要好好吃饭呀');
+  return sendEvent(kind);
 }
 
 function setMode(mode) {
@@ -657,9 +688,7 @@ async function init() {
   });
   $('mascotButton').addEventListener('click', () => {
     if (mascotDrag.suppressClick) { mascotDrag.suppressClick = false; return; }
-    if (!state.connected || !state.peerOnline) { toast('对方当前不在线'); return; }
-    unpeek();
-    sendEvent('pet');
+    triggerAction('pet');
   });
   const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: false, suppressClick: false };
   $('mascotButton').addEventListener('pointerdown', event => {
@@ -707,16 +736,12 @@ async function init() {
   $('mascotButton').addEventListener('mouseenter', unpeek);
   $('mascotButton').addEventListener('focus', unpeek);
   document.addEventListener('click', event => { if (!event.target.closest('#contextMenu')) $('contextMenu').hidden = true; });
-  $('waveButton').addEventListener('click', () => sendEvent('wave'));
-  $('careButton').addEventListener('click', () => {
-    if (!state.connected || !state.peerOnline) return toast('对方当前不在线');
-    sendEvent('message', '今天也要好好吃饭呀');
-  });
+  $('waveButton').addEventListener('click', () => triggerAction('wave'));
+  $('careButton').addEventListener('click', () => triggerAction('care'));
   $('actionMenuButton').addEventListener('click', () => { $('actionTray').hidden = !$('actionTray').hidden; });
   document.querySelectorAll('.action-choice').forEach(button => button.addEventListener('click', () => {
-    if (!state.connected || !state.peerOnline) return toast('对方当前不在线');
     $('actionTray').hidden = true;
-    sendEvent(button.dataset.action);
+    triggerAction(button.dataset.action);
   }));
   if (desktop) desktop.onWalkState(onWalkState);
   if (desktop?.onPeekState) desktop.onPeekState(peeked => {
