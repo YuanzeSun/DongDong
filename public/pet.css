@@ -28,7 +28,7 @@
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity .18s ease, visibility .18s ease;
+  transition: opacity .1s ease, visibility .1s ease;
 }
 .speech:empty { display: none; }
 .window.compact .companion-main:hover .speech,
@@ -38,6 +38,52 @@
 .window.compact:focus-within .speech,
 .window.compact:focus-within .couple-badge,
 .window.compact:focus-within .compact-actions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+.quick-composer {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 48px;
+  min-height: 48px;
+  margin: 0 10px 7px;
+  padding: 6px;
+  background: #fbfffcf5;
+  border: 1px solid #dbe8df;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px #2048312b;
+  z-index: 9;
+}
+.quick-composer input {
+  min-width: 0;
+  flex: 1;
+  height: 34px;
+  border: 1px solid #d7e7de;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #fff;
+  color: #263c33;
+  outline: 0;
+  font-size: 12px;
+}
+.quick-composer input::placeholder { color: #9aaba2; }
+.quick-composer .send-button { flex: none; width: 32px; height: 32px; }
+.quick-close-button {
+  flex: none;
+  width: 27px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+}
+.quick-close-button:hover { background: #e8f1ec; }
+.quick-close-button img { width: 15px; height: 15px; }
+.window.compact .quick-composer { -webkit-app-region: no-drag; }
+.window.compact.quick-composing .compact-actions {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;

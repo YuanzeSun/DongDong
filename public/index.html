@@ -64,6 +64,7 @@
         <button class="mascot-button" id="mascotButton" title="摸摸咚咚" aria-label="摸摸咚咚"><span class="mascot" id="mainMascot"></span></button>
         <span class="floor-shadow"></span>
         <div class="context-menu" id="contextMenu" hidden>
+          <button id="contextHistory">消息记录</button>
           <button id="contextSettings">房间设置</button>
           <button id="contextDisconnect">退出房间</button>
         </div>
@@ -72,9 +73,14 @@
         <button class="action-button wave-button" id="waveButton" title="向对方招手"><img src="./icons/hand.svg" alt=""><span>招手</span></button>
         <button class="action-button" id="actionMenuButton" title="更多动作"><img src="./icons/sparkles.svg" alt=""><span>动作</span></button>
         <button class="action-button" id="careButton" title="给对方一句关心"><img src="./icons/heart.svg" alt=""><span>关心</span></button>
-        <button class="action-button" id="openButton" title="展开消息"><img src="./icons/message-circle.svg" alt=""><span>消息</span></button>
+        <button class="action-button" id="openButton" title="写消息"><img src="./icons/message-circle.svg" alt=""><span>消息</span></button>
         <button class="action-button" id="quickFileButton" title="发送文件"><img src="./icons/paperclip.svg" alt=""><span>文件</span></button>
       </div>
+      <form class="quick-composer" id="quickMessageForm" hidden>
+        <input id="quickMessageInput" maxlength="1000" placeholder="写一句话…" aria-label="快速消息" autocomplete="off">
+        <button class="send-button" type="submit" title="发送" aria-label="发送"><img src="./icons/arrow-up.svg" alt=""></button>
+        <button class="quick-close-button" id="quickMessageClose" type="button" title="收起" aria-label="收起消息输入"><img src="./icons/x.svg" alt=""></button>
+      </form>
       <div class="action-tray" id="actionTray" hidden>
         <button class="action-choice" data-action="pet"><span>🤍</span>摸摸</button>
         <button class="action-choice" data-action="fish"><span>🐟</span>小鱼干</button>

@@ -229,6 +229,9 @@ function animateRemoteAction(kind) {
 }
 
 function animateLocalAction(kind) {
+  clearTimeout(napTimer);
+  clearTimeout(state.idleTimer);
+  clearTimeout(poseTimer);
   if (kind === 'walk') {
     if (desktop) desktop.startWalk();
     else animateRemoteAction('happy');
@@ -270,8 +273,22 @@ function setMode(mode) {
   $('setupFeedback').textContent = '';
 }
 
+function setQuickComposer(open) {
+  const form = $('quickMessageForm');
+  if (!form) return;
+  form.hidden = !open;
+  $('window').classList.toggle('quick-composing', open);
+  if (open) {
+    $('actionTray').hidden = true;
+    setTimeout(() => $('quickMessageInput').focus(), 0);
+  } else {
+    $('quickMessageInput').value = '';
+  }
+}
+
 function setExpanded(expanded) {
   state.expanded = expanded;
+  setQuickComposer(false);
   if (expanded) unpeek(true);
   $('window').classList.toggle('compact', !expanded);
   $('expanded').hidden = !expanded;
@@ -559,6 +576,7 @@ async function disconnect() {
   state.edgeAutoOuting = false;
   state.peeked = false;
   $('window').classList.remove('peeked');
+  setQuickComposer(false);
   clearTimeout(state.reconnectTimer);
   state.socket?.close();
   state.socket = null;
@@ -752,7 +770,25 @@ async function init() {
     if (action === 'settings') { setExpanded(true); setView('connection'); }
     if (action === 'show') setExpanded(state.connected ? state.expanded : true);
   });
-  $('openButton').addEventListener('click', () => { setView('chat'); setExpanded(true); });
+  $('openButton').addEventListener('click', () => {
+    // Keep the live message flow beside the cat. The full conversation is a
+    // separate panel, so this action never resizes or hides the mascot.
+    if (!state.connected) return toast('还没有连接房间');
+    setQuickComposer($('quickMessageForm').hidden);
+  });
+  $('quickMessageClose').addEventListener('click', () => setQuickComposer(false));
+  $('quickMessageForm').addEventListener('submit', event => {
+    event.preventDefault();
+    const input = $('quickMessageInput');
+    const text = input.value.trim();
+    if (!text) return;
+    if (!state.connected) return toast('还没有连接房间');
+    input.value = '';
+    sendMessage(text).finally(() => input.focus());
+  });
+  $('quickMessageInput').addEventListener('keydown', event => {
+    if (event.key === 'Escape') setQuickComposer(false);
+  });
   $('collapseButton').addEventListener('click', returnFromSettings);
   $('chatTab').addEventListener('click', () => setView('chat'));
   $('connectionTab').addEventListener('click', () => setView('connection'));
