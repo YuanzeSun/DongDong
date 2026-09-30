@@ -21,7 +21,11 @@ let poseTimer;
 let napTimer;
 let blinkTimer;
 let walkFrameTimer;
+let walkFallbackTimer;
 let wakeTimer;
+let wakeCallback;
+let actionEpoch = 0;
+let motionPendingKind = null;
 let peekTimer;
 let peekOutingTimer;
 let edgeHoldTimer;
@@ -68,6 +72,7 @@ function updateConnectionStatus() {
 function setPose(pose) {
   clearTimeout(wakeTimer);
   wakeTimer = null;
+  wakeCallback = null;
   state.pose = pose;
   const pet = $('mainMascot');
   pet.classList.remove('wiggle', 'happy', 'jump', 'nap', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'delivery', 'receive', 'speech-pop', 'hug', 'kiss', 'groom', 'purr', 'waking');
@@ -89,22 +94,41 @@ function setPose(pose) {
 }
 
 function wakeThen(callback) {
-  clearTimeout(wakeTimer);
-  wakeTimer = null;
   const pet = $('mainMascot');
   if (!['nap', 'sleep'].includes(state.pose)) return callback();
-  setPose('idle');
+  wakeCallback = callback;
+  if (wakeTimer) return;
+  pet.classList.remove('waking');
+  void pet.offsetWidth;
   pet.classList.add('waking');
   wakeTimer = setTimeout(() => {
+    const ready = wakeCallback;
     wakeTimer = null;
-    pet.classList.remove('waking');
-    callback();
+    setPose('idle');
+    ready?.();
   }, 240);
 }
 
-function transitionPose(pose) {
-  if (['nap', 'sleep'].includes(pose)) return setPose(pose);
-  wakeThen(() => setPose(pose));
+function transitionPose(pose, onReady = () => {}) {
+  if (['nap', 'sleep'].includes(pose)) {
+    setPose(pose);
+    onReady();
+    return;
+  }
+  wakeThen(() => { setPose(pose); onReady(); });
+}
+
+function interruptMotion() {
+  const wasWalking = state.walking;
+  const wasJumping = state.jumping;
+  const pending = motionPendingKind;
+  motionPendingKind = null;
+  state.walking = false;
+  state.jumping = false;
+  clearInterval(walkFrameTimer);
+  clearTimeout(walkFallbackTimer);
+  if (wasWalking || pending === 'walk') desktop?.stopWalk();
+  if (wasJumping || pending === 'jump') desktop?.stopJump();
 }
 
 function scheduleNap() {
@@ -118,9 +142,9 @@ function scheduleNap() {
 
 function schedulePeek() {
   clearTimeout(peekTimer);
-  if (!state.connected || state.expanded || state.walking || state.peeked || state.edgeHold || state.edgeAutoOuting) return;
+  if (!state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return;
   peekTimer = setTimeout(() => {
-    if (!state.connected || state.expanded || state.walking || state.peeked || state.edgeHold || state.edgeAutoOuting) return schedulePeek();
+    if (!state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return schedulePeek();
     state.peeked = true;
     clearTimeout(state.idleTimer);
     $('window').classList.add('peeked');
@@ -185,9 +209,9 @@ function unpeek(userInitiated = false) {
 
 function scheduleIdleAction() {
   clearTimeout(state.idleTimer);
-  if (!state.connected || !state.peerOnline || state.walking || state.peeked || !state.idleActions) return;
+  if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || !state.idleActions) return;
   state.idleTimer = setTimeout(() => {
-    if (!state.connected || !state.peerOnline || state.walking || state.peeked || state.edgeAutoOuting || state.pose !== 'idle') return scheduleIdleAction();
+    if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || state.edgeAutoOuting || state.pose !== 'idle') return scheduleIdleAction();
     const action = ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'nap', 'walk'][Math.floor(Math.random() * 7)];
     if (action === 'blink') {
       setPose('blink');
@@ -221,62 +245,114 @@ function setPeerOnline(online) {
     scheduleIdleAction();
   } else {
     clearTimeout(state.idleTimer);
-    if (state.connected && !state.walking) scheduleNap();
+    if (state.connected && !state.walking && !state.jumping) scheduleNap();
   }
 }
 
 function animatePet(kind = 'happy') {
+  interruptMotion();
+  const epoch = ++actionEpoch;
   clearTimeout(poseTimer);
   clearTimeout(napTimer);
   clearTimeout(state.idleTimer);
   const target = kind === 'wiggle' ? 'wave' : 'happy';
-  transitionPose(target);
-  poseTimer = setTimeout(() => transitionPose(state.peerOnline ? 'idle' : 'nap'), 1500);
+  transitionPose(target, () => {
+    if (epoch !== actionEpoch) return;
+    poseTimer = setTimeout(() => transitionPose(state.peerOnline ? 'idle' : 'nap'), 1500);
+  });
   if (state.peerOnline) scheduleNap();
 }
 
 function animateDelivery(progress = 1) {
+  interruptMotion();
+  const epoch = ++actionEpoch;
   clearTimeout(poseTimer);
   clearTimeout(deliveryFinishTimer);
+  clearTimeout(napTimer);
+  clearTimeout(state.idleTimer);
   wakeThen(() => {
+    if (epoch !== actionEpoch) return;
     const pet = $('mainMascot');
     setPose('idle');
     pet.classList.remove('delivery');
     void pet.offsetWidth;
     pet.style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, progress))));
     pet.classList.add('delivery');
-    deliveryFinishTimer = setTimeout(() => { pet.classList.remove('delivery'); transitionPose(state.peerOnline ? 'idle' : 'nap'); }, 2600);
+    deliveryFinishTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('delivery'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, 2600);
   });
 }
 
 function animateReceive() {
+  interruptMotion();
+  const epoch = ++actionEpoch;
   clearTimeout(poseTimer);
   clearTimeout(deliveryFinishTimer);
+  clearTimeout(napTimer);
+  clearTimeout(state.idleTimer);
   wakeThen(() => {
+    if (epoch !== actionEpoch) return;
     const pet = $('mainMascot');
     setPose('idle');
     pet.classList.remove('receive');
     void pet.offsetWidth;
     pet.classList.add('receive');
-    poseTimer = setTimeout(() => { pet.classList.remove('receive'); transitionPose(state.peerOnline ? 'idle' : 'nap'); }, 1600);
+    poseTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('receive'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, 1600);
   });
 }
 
 function animateRemoteAction(kind) {
+  interruptMotion();
+  const epoch = ++actionEpoch;
+  clearTimeout(poseTimer);
+  clearTimeout(napTimer);
+  clearTimeout(state.idleTimer);
   if (kind === 'sleep') {
     transitionPose('nap');
     return;
   }
-  clearTimeout(poseTimer);
-  clearTimeout(napTimer);
-  clearTimeout(state.idleTimer);
-  transitionPose(kind);
-  poseTimer = setTimeout(() => transitionPose(state.peerOnline ? 'idle' : 'nap'), kind === 'jump' ? 2200 : 1800);
+  transitionPose(kind, () => {
+    if (epoch !== actionEpoch) return;
+    poseTimer = setTimeout(() => {
+      if (epoch === actionEpoch) transitionPose(state.peerOnline ? 'idle' : 'nap');
+    }, kind === 'jump' ? 2200 : 1800);
+  });
 }
 
 function animateWalkFallback() {
   onWalkState(true);
-  setTimeout(() => { if (state.walking) onWalkState(false); }, 1600);
+  clearTimeout(walkFallbackTimer);
+  walkFallbackTimer = setTimeout(() => { if (state.walking) onWalkState(false); }, 1600);
+}
+
+function startMotion(kind) {
+  interruptMotion();
+  const epoch = ++actionEpoch;
+  clearTimeout(poseTimer);
+  clearTimeout(napTimer);
+  clearTimeout(state.idleTimer);
+  clearTimeout(deliveryFinishTimer);
+  wakeThen(() => {
+    if (epoch !== actionEpoch) return;
+    const start = kind === 'walk' ? desktop?.startWalk : desktop?.startJump;
+    if (!start) {
+      if (kind === 'walk') animateWalkFallback();
+      else animateRemoteAction('jump');
+      return;
+    }
+    motionPendingKind = kind;
+    Promise.resolve(start()).then(started => {
+      if (epoch !== actionEpoch) return;
+      motionPendingKind = null;
+      if (started) return;
+      if (kind === 'walk') animateWalkFallback();
+      else animateRemoteAction('jump');
+    }).catch(() => {
+      if (epoch !== actionEpoch) return;
+      motionPendingKind = null;
+      if (kind === 'walk') animateWalkFallback();
+      else animateRemoteAction('jump');
+    });
+  });
 }
 
 function animateLocalAction(kind) {
@@ -284,13 +360,11 @@ function animateLocalAction(kind) {
   clearTimeout(state.idleTimer);
   clearTimeout(poseTimer);
   if (kind === 'walk') {
-    if (desktop) Promise.resolve(desktop.startWalk()).then(started => { if (!started) animateWalkFallback(); }).catch(animateWalkFallback);
-    else animateWalkFallback();
+    startMotion('walk');
     return;
   }
   if (kind === 'jump') {
-    if (desktop) Promise.resolve(desktop.startJump()).then(started => { if (!started) animateRemoteAction('jump'); }).catch(() => animateRemoteAction('jump'));
-    else animateRemoteAction('jump');
+    startMotion('jump');
     return;
   }
   if (kind === 'wave') {
@@ -356,11 +430,17 @@ function setExpanded(expanded) {
 }
 
 function onWalkState(walking) {
+  if (!walking && !state.walking) return;
   state.walking = walking;
   clearInterval(walkFrameTimer);
   if (walking) {
+    motionPendingKind = null;
+    ++actionEpoch;
+    state.jumping = false;
     clearTimeout(poseTimer);
     clearTimeout(napTimer);
+    clearTimeout(state.idleTimer);
+    clearTimeout(deliveryFinishTimer);
     wakeThen(() => {
       if (!state.walking) return;
       let frame = 1;
@@ -368,19 +448,26 @@ function onWalkState(walking) {
       walkFrameTimer = setInterval(() => { frame = frame === 1 ? 2 : 1; setPose(`walk-${frame}`); }, 180);
       speak('出门散步啦', 'alert');
     });
-  } else if (state.connected) {
+  } else if (state.connected && !state.jumping) {
     transitionPose('idle');
     if (state.edgeAutoOuting) setTimeout(finishPeekOuting, 1800);
-    else scheduleNap();
+    else { scheduleNap(); scheduleIdleAction(); schedulePeek(); }
   }
 }
 
 function onJumpState(jumping) {
+  if (!jumping && !state.jumping) return;
   state.jumping = jumping;
   if (jumping) {
+    motionPendingKind = null;
+    ++actionEpoch;
+    state.walking = false;
+    clearInterval(walkFrameTimer);
+    clearTimeout(walkFallbackTimer);
     clearTimeout(poseTimer);
     clearTimeout(napTimer);
     clearTimeout(state.idleTimer);
+    clearTimeout(deliveryFinishTimer);
     wakeThen(() => {
       if (!state.jumping) return;
       setPose('jump');
@@ -389,7 +476,7 @@ function onJumpState(jumping) {
   } else if (!state.walking) {
     clearTimeout(poseTimer);
     transitionPose(state.connected && state.peerOnline ? 'idle' : 'nap');
-    if (state.connected) scheduleNap();
+    if (state.connected) { scheduleNap(); scheduleIdleAction(); schedulePeek(); }
   }
 }
 
@@ -554,14 +641,8 @@ function onEvent(event) {
   // mirrors the live event stream, otherwise opening it would duplicate effects.
   if (panelMode) return;
   const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
-  if (event.kind === 'walk' && desktop && !panelMode) {
-    Promise.resolve(desktop.startWalk()).then(started => { if (!started) animateWalkFallback(); }).catch(animateWalkFallback);
-  }
-  else if (event.kind === 'walk') animateWalkFallback();
-  else if (event.kind === 'jump' && desktop && !panelMode) {
-    Promise.resolve(desktop.startJump()).then(started => { if (!started) animateRemoteAction('jump'); }).catch(() => animateRemoteAction('jump'));
-  }
-  else if (event.kind === 'jump' && !panelMode) animateRemoteAction('jump');
+  if (event.kind === 'walk') startMotion('walk');
+  else if (event.kind === 'jump') startMotion('jump');
   else if (event.kind === 'wave') animatePet('wiggle');
   else if (actionText[event.kind]) animateRemoteAction(event.kind);
   if (event.senderId !== senderId) {

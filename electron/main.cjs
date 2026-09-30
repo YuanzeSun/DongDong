@@ -11,7 +11,7 @@ const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 else {
-  let window; let tray; let room; let walkTimer; let jumpTimer; let isQuitting = false; let isOnline = true; let peeked = false;
+  let window; let tray; let room; let walkTimer; let jumpTimer; let walkMotionId; let jumpMotionId; let isQuitting = false; let isOnline = true; let peeked = false;
   // The mascot window is intentionally independent from these regular utility windows. Closing
   // a panel must never hide the mascot, and closing the mascot must not tear down a panel.
   const panelWindows = new Map();
@@ -19,13 +19,19 @@ else {
   const sendMenuAction = action => { for (const listener of menuListeners) listener(action); };
   function stopWalk() {
     if (walkTimer) clearInterval(walkTimer);
+    const motionId = walkMotionId;
+    const wasWalking = Boolean(walkTimer);
     walkTimer = null;
-    if (window && !window.isDestroyed()) window.webContents.send('walk-state', false);
+    walkMotionId = null;
+    if (wasWalking && window && !window.isDestroyed()) window.webContents.send('walk-state', false, motionId);
   }
   function stopJump() {
     if (jumpTimer) clearInterval(jumpTimer);
+    const motionId = jumpMotionId;
+    const wasJumping = Boolean(jumpTimer);
     jumpTimer = null;
-    if (window && !window.isDestroyed()) window.webContents.send('jump-state', false);
+    jumpMotionId = null;
+    if (wasJumping && window && !window.isDestroyed()) window.webContents.send('jump-state', false, motionId);
   }
   function setPeeked(next) {
     if (!window || window.isDestroyed()) return false;
@@ -51,17 +57,18 @@ else {
     return peeked;
   }
   function clampWindow() { if (!window || window.isDestroyed()) return; const area = screen.getDisplayMatching(window.getBounds()).workArea; window.setBounds(clampBounds(window.getBounds(), area)); }
-  function startWalk() {
+  function startWalk(motionId) {
     if (!window || window.isDestroyed()) return false;
     stopJump();
     stopWalk();
     const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
     const left = area.x; const right = area.x + area.width - bounds.width; if (right <= left) return false;
-    const direction = right - bounds.x >= bounds.x - left ? 1 : -1; window.webContents.send('walk-state', true);
+    walkMotionId = motionId;
+    const direction = right - bounds.x >= bounds.x - left ? 1 : -1; window.webContents.send('walk-state', true, motionId);
     walkTimer = setInterval(() => { if (!window || window.isDestroyed()) return stopWalk(); const current = window.getPosition(); const x = Math.max(left, Math.min(right, current[0] + direction * 4)); window.setPosition(x, Math.max(area.y, Math.min(area.y + area.height - bounds.height, current[1])), false); if (x === left || x === right) stopWalk(); }, 30);
     return true;
   }
-  function startJump() {
+  function startJump(motionId) {
     if (!window || window.isDestroyed()) return false;
     stopWalk();
     stopJump();
@@ -73,14 +80,15 @@ else {
     const distance = Math.min(180, Math.max(72, Math.round(area.width * 0.12)));
     const direction = start.x - left < right - start.x ? 1 : -1;
     const targetX = Math.max(left, Math.min(right, start.x + direction * distance));
-    const duration = 920;
+    const duration = 1720;
     const launchedAt = Date.now();
-    window.webContents.send('jump-state', true);
+    jumpMotionId = motionId;
+    window.webContents.send('jump-state', true, motionId);
     jumpTimer = setInterval(() => {
       if (!window || window.isDestroyed()) return stopJump();
       const progress = Math.min(1, (Date.now() - launchedAt) / duration);
       const x = Math.round(start.x + (targetX - start.x) * progress);
-      const arc = Math.sin(Math.PI * progress) * Math.min(96, Math.max(48, area.height * 0.12));
+      const arc = Math.abs(Math.sin(Math.PI * 2 * progress)) * Math.min(96, Math.max(48, area.height * 0.12));
       const y = Math.round(Math.max(area.y, Math.min(bottom, start.y - arc)));
       window.setPosition(x, y, false);
       if (progress >= 1) {
@@ -182,7 +190,7 @@ else {
       const clamped = clampBounds(next, area);
       if (next.x !== clamped.x || next.y !== clamped.y) window.setPosition(clamped.x, clamped.y, false);
     });
-    ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', () => startWalk()); ipcMain.handle('stop-walk', () => stopWalk()); ipcMain.handle('start-jump', () => startJump()); ipcMain.handle('stop-jump', () => stopJump());
+    ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', (_event, motionId) => startWalk(motionId)); ipcMain.handle('stop-walk', () => stopWalk()); ipcMain.handle('start-jump', (_event, motionId) => startJump(motionId)); ipcMain.handle('stop-jump', () => stopJump());
     ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) { stopWalk(); stopJump(); } return isOnline; }); ipcMain.handle('set-ignore-mouse-events', (_event, ignore, options = {}) => window?.setIgnoreMouseEvents(Boolean(ignore), { forward: options.forward !== false }));
     ipcMain.handle('set-peeked', (_event, next) => setPeeked(next));
     ipcMain.handle('open-panel', (_event, kind) => openPanel(kind));

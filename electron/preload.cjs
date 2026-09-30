@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const panelArgument = process.argv.find(value => value.startsWith('--dongdong-panel='));
 const panelKind = panelArgument?.slice('--dongdong-panel='.length) || new URLSearchParams(globalThis.location?.search || '').get('panel') || '';
+let motionId = 0;
+let motionKind = null;
 
 contextBridge.exposeInMainWorld('petDesktop', {
   // Panels are regular windows. They share the renderer's session storage with the mascot,
@@ -15,14 +17,14 @@ contextBridge.exposeInMainWorld('petDesktop', {
   moveWindow: (dx, dy) => ipcRenderer.send('move-window', dx, dy),
   setPeeked: peeked => ipcRenderer.invoke('set-peeked', peeked),
   setPinned: pinned => ipcRenderer.invoke('set-pin', pinned),
-  startWalk: () => ipcRenderer.invoke('start-walk'),
-  stopWalk: () => ipcRenderer.invoke('stop-walk'),
-  startJump: () => ipcRenderer.invoke('start-jump'),
-  stopJump: () => ipcRenderer.invoke('stop-jump'),
+  startWalk: () => { motionKind = 'walk'; return ipcRenderer.invoke('start-walk', ++motionId); },
+  stopWalk: () => { if (motionKind === 'walk') { ++motionId; motionKind = null; } return ipcRenderer.invoke('stop-walk'); },
+  startJump: () => { motionKind = 'jump'; return ipcRenderer.invoke('start-jump', ++motionId); },
+  stopJump: () => { if (motionKind === 'jump') { ++motionId; motionKind = null; } return ipcRenderer.invoke('stop-jump'); },
   setOnline: online => ipcRenderer.invoke('set-online', online),
   setIgnoreMouseEvents: (ignore, options) => ipcRenderer.invoke('set-ignore-mouse-events', ignore, options),
-  onWalkState: callback => ipcRenderer.on('walk-state', (_event, walking) => callback(walking)),
-  onJumpState: callback => ipcRenderer.on('jump-state', (_event, jumping) => callback(jumping)),
+  onWalkState: callback => ipcRenderer.on('walk-state', (_event, walking, id) => { if (id === motionId) { if (!walking) motionKind = null; callback(walking); } }),
+  onJumpState: callback => ipcRenderer.on('jump-state', (_event, jumping, id) => { if (id === motionId) { if (!jumping) motionKind = null; callback(jumping); } }),
   onPeekState: callback => ipcRenderer.on('peek-state', (_event, peeked) => callback(peeked)),
   copy: value => ipcRenderer.invoke('copy', value),
   saveDownload: (data, name) => ipcRenderer.invoke('save-download', data, name),
