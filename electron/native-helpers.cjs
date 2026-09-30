@@ -74,4 +74,48 @@ function clampBounds(bounds, area) {
   };
 }
 
-module.exports = { downloadName, downloadBuffer, saveUniqueDownload, clampBounds };
+function planWalkPath(bounds, area, random = Math.random) {
+  const left = area.x;
+  const right = area.x + area.width - bounds.width;
+  const top = area.y;
+  const bottom = area.y + area.height - bounds.height;
+  if (right - left < 48) return [];
+  let x = Math.max(left, Math.min(right, bounds.x));
+  let y = Math.max(top, Math.min(bottom, bounds.y));
+  const leftRoom = x - left;
+  const rightRoom = right - x;
+  const firstDirection = Math.min(leftRoom, rightRoom) < 110
+    ? (rightRoom > leftRoom ? 1 : -1)
+    : (random() < 0.5 ? -1 : 1);
+  const points = [];
+  for (const [index, baseDistance] of [95, 65, 105, 55].entries()) {
+    let direction = index % 2 ? -firstDirection : firstDirection;
+    let room = direction > 0 ? right - x : x - left;
+    if (room < 24) {
+      direction *= -1;
+      room = direction > 0 ? right - x : x - left;
+    }
+    if (room < 24) break;
+    x += direction * Math.min(room, baseDistance + Math.round(random() * 25));
+    y = Math.max(top, Math.min(bottom, y + [0, -12, 18, -6][index]));
+    points.push({ x: Math.round(x), y: Math.round(y) });
+  }
+  return points;
+}
+
+function tailnetPeers(status) {
+  const self = new Set(status?.Self?.TailscaleIPs || []);
+  const peers = Object.values(status?.Peer || {}).flatMap(peer => {
+    const address = (peer.TailscaleIPs || []).find(ip => {
+      const octets = ip.split('.').map(Number);
+      return octets.length === 4 && octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255)
+        && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127 && !self.has(ip);
+    });
+    if (!address) return [];
+    return [{ address, name: String(peer.HostName || peer.DNSName || address).replace(/\.$/, '').slice(0, 80), online: peer.Online === true }];
+  });
+  return [...new Map(peers.map(peer => [peer.address, peer])).values()]
+    .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+}
+
+module.exports = { downloadName, downloadBuffer, saveUniqueDownload, clampBounds, planWalkPath, tailnetPeers };

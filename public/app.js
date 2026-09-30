@@ -14,6 +14,7 @@ const state = {
   peerName: '对方', profile: {},
   reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, jumping: false, pose: 'idle',
   idleActions: JSON.parse(localStorage.getItem('dongdong-idle-actions') ?? 'true'),
+  edgeHideEnabled: JSON.parse(localStorage.getItem('dongdong-edge-hide') ?? 'false'),
   peeked: false, edgeHold: false, edgeAutoOuting: false,
   notifications: JSON.parse(localStorage.getItem('dongdong-notifications') ?? 'true')
 };
@@ -25,12 +26,15 @@ let walkFrameTimer;
 let walkFallbackTimer;
 let wakeTimer;
 let wakeCallback;
+let stanceTimer;
+let voiceTimer;
 let actionEpoch = 0;
 let motionPendingKind = null;
 let peekTimer;
 let peekOutingTimer;
 let edgeHoldTimer;
 let deliveryFinishTimer;
+let connectionEpoch = 0;
 const pendingDeliveries = new Map();
 
 if (panelMode) document.body.classList.add('panel-mode');
@@ -45,6 +49,22 @@ function speak(message, kind = 'normal') {
     $('speech').classList.remove('speech-pop', 'speech-alert');
     $('speech').textContent = '';
   }, 1800);
+}
+
+const ACTION_VOICES = {
+  wave: ['喵～', '喵呜！'], happy: ['喵！', '咪呀！'], jump: ['喵呜！', '咪！'],
+  walk: ['喵～', '咪呜～'], pet: ['呼噜～', '咪～'], fish: ['喵！', '咪呀～'],
+  stretch: ['喵嗷～', '哈啊～'], groom: ['咪～', '喵～'], hug: ['咪呜～', '喵～'],
+  kiss: ['啾～', '咪！'], purr: ['呼噜噜～', '咕噜咕噜～']
+};
+function actionVoice(pose) {
+  const bubble = $('voiceBubble');
+  clearTimeout(voiceTimer);
+  const options = ACTION_VOICES[pose];
+  if (!options) { bubble.hidden = true; return; }
+  bubble.textContent = options[Math.floor(Math.random() * options.length)];
+  bubble.hidden = false;
+  voiceTimer = setTimeout(() => { bubble.hidden = true; }, pose === 'purr' ? 5000 : 1350);
 }
 
 function setAutoLaunchToggles(value) {
@@ -66,12 +86,15 @@ function setStatus(text, kind = '') {
 
 function updateConnectionStatus() {
   if (!state.connected) return setStatus('待连接');
-  if (state.roomConnection !== 'online') return setStatus(state.roomConnection === 'reconnecting' ? '重连中' : '正在连接', 'offline');
+  if (state.roomConnection !== 'online') return setStatus('对方离线', 'offline');
   setStatus(state.peerOnline ? '已连接' : '对方离线', state.peerOnline ? 'online' : 'offline');
 }
 
 function setPose(pose) {
+  const previous = state.pose.startsWith('walk-') ? 'walk' : state.pose;
+  const next = pose.startsWith('walk-') ? 'walk' : pose;
   clearTimeout(wakeTimer);
+  clearTimeout(stanceTimer);
   wakeTimer = null;
   wakeCallback = null;
   state.pose = pose;
@@ -89,6 +112,7 @@ function setPose(pose) {
   }[pose] || 'mascot';
   pet.style.backgroundImage = `url('./${sprite}.svg')`;
   catAnimator?.play(pose);
+  if (previous !== next) actionVoice(next);
   if (pose === 'wave') pet.classList.add('wiggle');
   if (pose === 'happy') pet.classList.add('happy');
   if (pose === 'nap' || pose === 'sleep') pet.classList.add('nap', 'sleep');
@@ -97,22 +121,37 @@ function setPose(pose) {
 
 function wakeThen(callback) {
   const pet = $('mainMascot');
-  if (!['nap', 'sleep'].includes(state.pose)) return callback();
+  const resting = state.pose;
+  if (!['nap', 'sleep', 'nest', 'nest-enter', 'loaf', 'loaf-enter', 'purr'].includes(resting)) return callback();
   wakeCallback = callback;
   if (wakeTimer) return;
   pet.classList.remove('waking');
   void pet.offsetWidth;
   pet.classList.add('waking');
-  catAnimator?.play('wake');
+  const rise = resting === 'nest' || resting === 'nest-enter' ? 'nest-rise' : ['loaf', 'loaf-enter', 'purr'].includes(resting) ? 'loaf-rise' : 'wake';
+  catAnimator?.play(rise);
   wakeTimer = setTimeout(() => {
     const ready = wakeCallback;
     wakeTimer = null;
     setPose('idle');
     ready?.();
-  }, 600);
+  }, catAnimator?.durationFor(rise) || 600);
 }
 
 function transitionPose(pose, onReady = () => {}) {
+  if (pose === 'loaf' || pose === 'nest') {
+    if (state.pose === pose) return onReady();
+    wakeThen(() => {
+      const entering = `${pose}-enter`;
+      setPose(entering);
+      stanceTimer = setTimeout(() => {
+        if (state.pose !== entering) return;
+        setPose(pose);
+        onReady();
+      }, catAnimator?.durationFor(entering) || 800);
+    });
+    return;
+  }
   if (['nap', 'sleep'].includes(pose)) {
     setPose(pose);
     onReady();
@@ -138,16 +177,19 @@ function scheduleNap() {
   clearTimeout(napTimer);
   napTimer = setTimeout(() => {
     if (!state.connected) return;
-    if (state.peerOnline) return scheduleIdleAction();
+    if (state.peerOnline) {
+      if (['idle', 'loaf'].includes(state.pose)) transitionPose('nest');
+      return scheduleIdleAction();
+    }
     setPose('nap');
   }, state.peerOnline ? 45000 : 250);
 }
 
 function schedulePeek() {
   clearTimeout(peekTimer);
-  if (!state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return;
+  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return;
   peekTimer = setTimeout(() => {
-    if (!state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return schedulePeek();
+    if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return schedulePeek();
     state.peeked = true;
     clearTimeout(state.idleTimer);
     $('window').classList.add('peeked');
@@ -156,11 +198,23 @@ function schedulePeek() {
   }, 70000 + Math.random() * 50000);
 }
 
+function setEdgeHide(enabled) {
+  state.edgeHideEnabled = Boolean(enabled);
+  $('edgeHideToggle').checked = state.edgeHideEnabled;
+  if (state.edgeHideEnabled) return schedulePeek();
+  clearTimeout(peekTimer);
+  clearTimeout(peekOutingTimer);
+  clearTimeout(edgeHoldTimer);
+  state.edgeHold = false;
+  state.edgeAutoOuting = false;
+  unpeek(false);
+}
+
 function schedulePeekOuting() {
   clearTimeout(peekOutingTimer);
-  if (!state.connected || state.expanded || !state.peeked || state.edgeHold) return;
+  if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold) return;
   peekOutingTimer = setTimeout(() => {
-    if (!state.connected || state.expanded || !state.peeked || state.edgeHold) return;
+    if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold) return;
     state.edgeAutoOuting = true;
     state.peeked = false;
     $('window').classList.remove('peeked');
@@ -180,7 +234,7 @@ function schedulePeekOuting() {
 function finishPeekOuting() {
   if (!state.edgeAutoOuting) return;
   state.edgeAutoOuting = false;
-  if (!state.connected || state.expanded || state.edgeHold) return;
+  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.edgeHold) return;
   state.peeked = true;
   clearTimeout(state.idleTimer);
   $('window').classList.add('peeked');
@@ -214,24 +268,28 @@ function scheduleIdleAction() {
   clearTimeout(state.idleTimer);
   if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || !state.idleActions) return;
   state.idleTimer = setTimeout(() => {
-    if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || state.edgeAutoOuting || state.pose !== 'idle') return scheduleIdleAction();
-    const action = ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'nap', 'walk'][Math.floor(Math.random() * 7)];
+    if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || state.edgeAutoOuting || !['idle', 'loaf', 'nest'].includes(state.pose)) return scheduleIdleAction();
+    const choices = state.pose === 'idle'
+      ? ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'loaf', 'nest']
+      : ['idle', 'sit', 'stretch', state.pose === 'loaf' ? 'nest' : 'loaf'];
+    if (desktop) choices.push('walk');
+    const action = choices[Math.floor(Math.random() * choices.length)];
     if (action === 'blink') {
       setPose('blink');
       setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, catAnimator?.durationFor('blink') || 260);
     } else if (action === 'walk' && desktop) {
       startMotion('walk');
-    } else if (action === 'nap') {
-      setPose('nap');
-      setTimeout(() => { if (state.connected && state.pose === 'nap') setPose('idle'); }, 2600);
+    } else if (['idle', 'loaf', 'nest'].includes(action)) {
+      transitionPose(action);
     } else if (['sit', 'stretch'].includes(action)) {
-      setPose(action);
-      setTimeout(() => { if (state.connected && state.pose === action) setPose('idle'); }, (catAnimator?.durationFor(action) || 1800) + 80);
+      transitionPose(action, () => setTimeout(() => {
+        if (state.connected && state.pose === action) transitionPose('idle');
+      }, (catAnimator?.durationFor(action) || 1800) + 80));
     } else {
       animatePet(action);
     }
     scheduleIdleAction();
-  }, 18000 + Math.random() * 18000);
+  }, 28000 + Math.random() * 24000);
 }
 
 function setPeerOnline(online) {
@@ -315,14 +373,24 @@ function animateRemoteAction(kind) {
   clearTimeout(napTimer);
   clearTimeout(state.idleTimer);
   if (kind === 'sleep') {
-    transitionPose('nap');
+    transitionPose('nest');
+    return;
+  }
+  if (kind === 'purr') {
+    transitionPose('loaf', () => {
+      if (epoch !== actionEpoch) return;
+      setPose('purr');
+      poseTimer = setTimeout(() => {
+        if (epoch === actionEpoch) transitionPose(state.peerOnline ? 'idle' : 'nap');
+      }, 3400);
+    });
     return;
   }
   transitionPose(kind, () => {
     if (epoch !== actionEpoch) return;
     poseTimer = setTimeout(() => {
       if (epoch === actionEpoch) transitionPose(state.peerOnline ? 'idle' : 'nap');
-    }, kind === 'purr' ? 3400 : (catAnimator?.durationFor(kind) || 1800) + 80);
+    }, (catAnimator?.durationFor(kind) || 1800) + 80);
   });
 }
 
@@ -411,22 +479,83 @@ function setMode(mode) {
   $('setupFeedback').textContent = '';
 }
 
+let scanRequestId = 0;
+async function scanPeers() {
+  const requestId = ++scanRequestId;
+  const results = $('scanResults');
+  const button = $('scanPeersButton');
+  results.hidden = false;
+  results.replaceChildren();
+  const message = document.createElement('p');
+  message.className = 'scan-message';
+  message.textContent = '正在查找设备…';
+  results.appendChild(message);
+  button.disabled = true;
+  try {
+    if (!desktop?.scanPeers) throw new Error('请在桌面应用中扫描设备');
+    const peers = await desktop.scanPeers();
+    if (requestId !== scanRequestId) return;
+    results.replaceChildren();
+    if (!peers.length) {
+      message.textContent = '暂未发现其他 Tailscale 设备';
+      results.appendChild(message);
+      return;
+    }
+    for (const peer of peers) {
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.disabled = !peer.online;
+      choice.className = 'scan-choice';
+      const device = document.createElement('span');
+      device.className = 'scan-device';
+      const name = document.createElement('strong');
+      name.textContent = peer.name;
+      const address = document.createElement('small');
+      address.textContent = peer.address;
+      device.append(name, address);
+      const room = document.createElement('span');
+      room.className = `scan-room${peer.room ? '' : ' muted'}`;
+      room.textContent = peer.room ? '咚咚房间' : peer.online ? '设备在线' : '离线';
+      choice.append(device, room);
+      choice.addEventListener('click', () => {
+        $('joinAddress').value = peer.address;
+        results.querySelectorAll('.scan-choice').forEach(item => item.classList.remove('selected'));
+        choice.classList.add('selected');
+        $('joinKey').focus();
+      });
+      results.appendChild(choice);
+    }
+  } catch (error) {
+    if (requestId !== scanRequestId) return;
+    message.textContent = `${error.message}，仍可手动输入地址`;
+    results.replaceChildren(message);
+  } finally {
+    if (requestId === scanRequestId) button.disabled = false;
+  }
+}
+
 function setQuickComposer(open) {
   const form = $('quickMessageForm');
   if (!form) return;
   form.hidden = !open;
   $('window').classList.toggle('quick-composing', open);
   if (open) {
-    $('actionTray').hidden = true;
+    setActionTray(false);
     setTimeout(() => $('quickMessageInput').focus(), 0);
   } else {
     $('quickMessageInput').value = '';
   }
 }
 
+function setActionTray(open) {
+  $('actionTray').hidden = !open;
+  $('actionMenuButton').setAttribute('aria-expanded', String(open));
+}
+
 function setExpanded(expanded) {
   state.expanded = expanded;
   setQuickComposer(false);
+  setActionTray(false);
   if (expanded && !panelMode) unpeek(true);
   $('window').classList.toggle('compact', !expanded);
   $('expanded').hidden = !expanded;
@@ -441,6 +570,7 @@ function onWalkState(walking) {
   if (!walking && !state.walking) return;
   state.walking = walking;
   clearInterval(walkFrameTimer);
+  if (!walking) $('mainMascot').classList.remove('walk-left', 'walk-right');
   if (walking) {
     motionPendingKind = null;
     ++actionEpoch;
@@ -555,11 +685,19 @@ function applyProfile(profile = {}) {
 }
 
 async function openSession(url, key, name, mode) {
-  const response = await fetch(`${url}/api/session`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Pet-Key': key },
-    body: JSON.stringify({ senderId, senderName: name, mode })
-  });
+  let response;
+  try {
+    response = await fetch(`${url}/api/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Pet-Key': key },
+      body: JSON.stringify({ senderId, senderName: name, mode }),
+      signal: AbortSignal.timeout(4000)
+    });
+  } catch {
+    const error = new Error('房间暂时不可达');
+    error.code = 'ROOM_UNREACHABLE';
+    throw error;
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `连接失败 (${response.status})`);
   return body;
@@ -687,25 +825,54 @@ function openSocket() {
   };
   socket.onclose = () => {
     if (!state.connected || state.socket !== socket) return;
+    state.socket = null;
+    state.token = '';
     state.roomConnection = 'reconnecting';
     setPeerOnline(false);
-    clearTimeout(state.reconnectTimer);
-    state.reconnectTimer = setTimeout(openSocket, 2500);
+    scheduleSessionRetry();
   };
 }
 
+function scheduleSessionRetry(delay = 2500) {
+  clearTimeout(state.reconnectTimer);
+  if (!state.connected) return;
+  const epoch = connectionEpoch;
+  state.reconnectTimer = setTimeout(async () => {
+    if (!state.connected || epoch !== connectionEpoch) return;
+    try {
+      const session = await openSession(state.url, state.key, state.name, state.mode);
+      if (!state.connected || epoch !== connectionEpoch) return;
+      state.token = session.token;
+      state.profile = session.profile || {};
+      applyProfile(state.profile);
+      setPeerOnline(session.presence || false);
+      openSocket();
+    } catch {
+      if (state.connected && epoch === connectionEpoch) scheduleSessionRetry(5000);
+    }
+  }, delay);
+}
+
 async function connect(url, key, name, mode) {
+  const epoch = ++connectionEpoch;
   state.url = normalizeAddress(url);
   state.key = key.trim();
   state.name = name.trim().slice(0, 24);
   state.mode = mode;
-  const session = await openSession(state.url, state.key, state.name, mode);
-  state.token = session.token;
-  state.profile = session.profile || {};
-  const response = await request('/events');
-  const events = await response.json();
+  let session = null;
+  try { session = await openSession(state.url, state.key, state.name, mode); }
+  catch (error) { if (error.code !== 'ROOM_UNREACHABLE') throw error; }
+  if (epoch !== connectionEpoch) return;
+  state.token = session?.token || '';
+  state.profile = session?.profile || {};
+  let events = [];
+  if (session) {
+    try { events = await (await request('/events')).json(); }
+    catch { /* A room may close just after the session opens. */ }
+  }
+  if (epoch !== connectionEpoch) return;
   state.connected = true;
-  state.roomConnection = 'connecting';
+  state.roomConnection = session ? 'connecting' : 'reconnecting';
   $('setup').hidden = true;
   $('companion').hidden = false;
   $('pinButton').hidden = !desktop;
@@ -726,7 +893,7 @@ async function connect(url, key, name, mode) {
     $('speech').textContent = '';
   }
   applyProfile(state.profile);
-  setPeerOnline(session.presence || false);
+  setPeerOnline(session?.presence || false);
   if (panelMode) {
     state.expanded = true;
     $('window').classList.remove('compact');
@@ -748,11 +915,13 @@ async function connect(url, key, name, mode) {
   }, 6800);
   scheduleIdleAction();
   schedulePeek();
-  openSocket();
+  if (session) openSocket();
+  else scheduleSessionRetry();
   localStorage.setItem(SESSION_KEY, JSON.stringify({ url: state.url, key: state.key, name: state.name, mode }));
 }
 
 async function disconnect() {
+  ++connectionEpoch;
   try { if (state.token) await request('/leave', { method: 'POST' }); } catch { /* Room may already be gone. */ }
   state.connected = false;
   state.roomConnection = 'closed';
@@ -771,6 +940,7 @@ async function disconnect() {
   state.peeked = false;
   $('window').classList.remove('peeked');
   setQuickComposer(false);
+  setActionTray(false);
   clearTimeout(state.reconnectTimer);
   state.socket?.close();
   state.socket = null;
@@ -871,7 +1041,9 @@ async function init() {
     $('appSettings').hidden = false;
   }
   $('hostTab').addEventListener('click', () => setMode('host'));
-  $('joinTab').addEventListener('click', () => setMode('join'));
+  $('joinTab').addEventListener('click', () => { setMode('join'); scanPeers(); });
+  $('scanPeersButton').addEventListener('click', scanPeers);
+  $('joinAddress').addEventListener('input', () => $('scanResults').querySelectorAll('.scan-choice').forEach(item => item.classList.remove('selected')));
   $('closeButton').addEventListener('click', () => {
     if (panelMode) {
       desktop?.closePanel();
@@ -895,11 +1067,19 @@ async function init() {
   });
   $('settingsBackButton').addEventListener('click', returnFromSettings);
   $('idleActionsToggle').checked = state.idleActions;
+  $('edgeHideToggle').checked = state.edgeHideEnabled;
   $('desktopNotificationsToggle').checked = state.notifications;
   $('idleActionsToggle').addEventListener('change', event => {
     state.idleActions = event.target.checked;
     localStorage.setItem('dongdong-idle-actions', JSON.stringify(state.idleActions));
     if (state.idleActions) scheduleIdleAction(); else clearTimeout(state.idleTimer);
+  });
+  $('edgeHideToggle').addEventListener('change', event => {
+    setEdgeHide(event.target.checked);
+    localStorage.setItem('dongdong-edge-hide', JSON.stringify(state.edgeHideEnabled));
+  });
+  window.addEventListener('storage', event => {
+    if (event.key === 'dongdong-edge-hide') setEdgeHide(event.newValue === 'true');
   });
   $('desktopNotificationsToggle').addEventListener('change', event => {
     state.notifications = event.target.checked;
@@ -978,15 +1158,29 @@ async function init() {
   });
   $('mascotButton').addEventListener('mouseenter', unpeek);
   $('mascotButton').addEventListener('focus', unpeek);
-  document.addEventListener('click', event => { if (!event.target.closest('#contextMenu')) $('contextMenu').hidden = true; });
+  document.addEventListener('click', event => {
+    if (!event.target.closest('#contextMenu')) $('contextMenu').hidden = true;
+    if (!event.target.closest('#actionTray, #actionMenuButton')) setActionTray(false);
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (!$('actionTray').hidden) { setActionTray(false); $('actionMenuButton').focus(); }
+    $('contextMenu').hidden = true;
+  });
   $('waveButton').addEventListener('click', () => triggerAction('wave'));
   $('careButton').addEventListener('click', () => triggerAction('care'));
-  $('actionMenuButton').addEventListener('click', () => { $('actionTray').hidden = !$('actionTray').hidden; });
+  $('actionMenuButton').addEventListener('click', () => setActionTray($('actionTray').hidden));
+  $('actionTrayClose').addEventListener('click', () => setActionTray(false));
   document.querySelectorAll('.action-choice').forEach(button => button.addEventListener('click', () => {
-    $('actionTray').hidden = true;
+    if (!button.dataset.action) return;
+    setActionTray(false);
     triggerAction(button.dataset.action);
   }));
   if (desktop) desktop.onWalkState(onWalkState);
+  if (desktop?.onWalkDirection) desktop.onWalkDirection(direction => {
+    $('mainMascot').classList.toggle('walk-left', direction < 0);
+    $('mainMascot').classList.toggle('walk-right', direction > 0);
+  });
   if (desktop?.onJumpState) desktop.onJumpState(onJumpState);
   if (desktop?.onPeekState) desktop.onPeekState(peeked => {
     state.peeked = Boolean(peeked);

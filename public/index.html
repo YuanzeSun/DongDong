@@ -41,6 +41,8 @@
       <form id="joinForm" class="setup-form" hidden>
         <label>你的名字<input id="joinName" maxlength="24" autocomplete="nickname" placeholder="给对方看的名字" required></label>
         <label>对方的 Tailscale 地址<input id="joinAddress" inputmode="url" placeholder="100.x.y.z" required></label>
+        <div class="scan-heading"><span>同一 Tailscale 网络</span><button id="scanPeersButton" type="button" title="重新扫描设备"><img src="./icons/scan-search.svg" alt="">扫描设备</button></div>
+        <div class="scan-results" id="scanResults" aria-live="polite" hidden></div>
         <label>配对码<input id="joinKey" autocomplete="off" spellcheck="false" placeholder="从对方那里获取" required></label>
         <button class="primary-button" type="submit">加入房间 <img src="./icons/arrow-right.svg" alt=""></button>
       </form>
@@ -55,6 +57,7 @@
       <p class="settings-intro">调整小橘的启动方式和陪伴节奏。</p>
       <label class="setting-row" for="autoLaunchSetup"><span><strong>开机自启动</strong><small>登录系统后自动打开小橘</small></span><input type="checkbox" id="autoLaunchSetup"></label>
       <label class="setting-row" for="idleActionsToggle"><span><strong>允许小猫自己玩</strong><small>对方在线时偶尔眨眼、打盹或撒娇</small></span><input type="checkbox" id="idleActionsToggle" checked></label>
+      <label class="setting-row" for="edgeHideToggle"><span><strong>长时间无操作时靠边</strong><small>偶尔出来活动，互动后会留下片刻</small></span><input type="checkbox" id="edgeHideToggle"></label>
       <label class="setting-row" for="desktopNotificationsToggle"><span><strong>桌面通知</strong><small>收到消息或文件时提醒我</small></span><input type="checkbox" id="desktopNotificationsToggle" checked></label>
     </section>
 
@@ -62,7 +65,7 @@
       <div class="companion-main">
         <div class="speech" id="speech" aria-live="polite"></div>
         <div class="couple-badge" id="coupleBadge" hidden><span id="petNameLabel">小橘</span></div>
-        <button class="mascot-button" id="mascotButton" title="摸摸小橘" aria-label="摸摸小橘"><span class="mascot" id="mainMascot"></span></button>
+        <button class="mascot-button" id="mascotButton" title="摸摸小橘" aria-label="摸摸小橘"><span class="mascot" id="mainMascot"></span><span class="voice-bubble" id="voiceBubble" aria-live="polite" hidden></span></button>
         <span class="floor-shadow"></span>
         <div class="context-menu" id="contextMenu" hidden>
           <button id="contextHistory">消息记录</button>
@@ -93,6 +96,7 @@
         <button class="action-choice" data-action="kiss"><span>💋</span>亲亲</button>
         <button class="action-choice" data-action="groom"><span>🧶</span>梳毛</button>
         <button class="action-choice" data-action="purr"><span>💗</span>呼噜</button>
+        <button class="action-choice action-close" id="actionTrayClose" title="收起动作" aria-label="收起动作"><img src="./icons/x.svg" alt="">收起</button>
       </div>
       <div class="expanded" id="expanded" hidden>
         <div class="tabs" role="tablist" aria-label="房间视图">

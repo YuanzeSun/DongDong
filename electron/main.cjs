@@ -3,15 +3,45 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const { createRoom } = require('../server/room.cjs');
-const { downloadBuffer, saveUniqueDownload, clampBounds } = require('./native-helpers.cjs');
+const { downloadBuffer, saveUniqueDownload, clampBounds, planWalkPath, tailnetPeers } = require('./native-helpers.cjs');
 
 const PORT = 4827;
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+const execFileAsync = promisify(execFile);
+async function tailscaleStatus() {
+  const commands = process.platform === 'win32'
+    ? ['tailscale.exe', path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Tailscale', 'tailscale.exe'), path.join(process.env.LOCALAPPDATA || '', 'Tailscale', 'tailscale.exe')]
+    : ['tailscale', '/usr/local/bin/tailscale', '/opt/homebrew/bin/tailscale'];
+  for (const command of [...new Set(commands)]) {
+    try {
+      const { stdout } = await execFileAsync(command, ['status', '--json'], { timeout: 5000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+      return JSON.parse(stdout);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw new Error('无法读取 Tailscale 设备，请检查 Tailscale 是否已登录');
+    }
+  }
+  throw new Error('未找到 Tailscale 命令');
+}
+async function scanTailnetPeers() {
+  const peers = tailnetPeers(await tailscaleStatus()).slice(0, 64);
+  return Promise.all(peers.map(async peer => {
+    if (!peer.online) return { ...peer, room: false };
+    try {
+      const response = await fetch(`http://${peer.address}:${PORT}/api/discover`, { signal: AbortSignal.timeout(1200) });
+      if (!response.ok) return { ...peer, room: false };
+      const data = await response.json();
+      return { ...peer, room: data.app === 'dongdong' && data.protocol === '3' };
+    } catch { return { ...peer, room: false }; }
+  }));
+}
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 else {
-  let window; let tray; let room; let walkTimer; let jumpTimer; let walkMotionId; let jumpMotionId; let isQuitting = false; let isOnline = true; let peeked = false;
+  let window; let tray; let room; let walkTimer; let jumpTimer; let walkMotionId; let jumpMotionId; let isQuitting = false; let isOnline = true; let peeked = false; let prePeekBounds = null;
   // The mascot window is intentionally independent from these regular utility windows. Closing
   // a panel must never hide the mascot, and closing the mascot must not tear down a panel.
   const panelWindows = new Map();
@@ -35,13 +65,15 @@ else {
   }
   function setPeeked(next) {
     if (!window || window.isDestroyed()) return false;
-    peeked = Boolean(next);
     const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
+    peeked = Boolean(next);
     if (peeked) {
+      prePeekBounds = bounds;
       const width = 138; const height = 176;
       const rightSide = bounds.x + bounds.width / 2 >= area.x + area.width / 2;
       const x = rightSide ? area.x + area.width - width : area.x;
-      window.setBounds(clampBounds({ x, y: Math.max(area.y, area.y + area.height - height - 36), width, height }, area));
+      const y = bounds.y + Math.round((bounds.height - height) / 2);
+      window.setBounds(clampBounds({ x, y, width, height }, area));
     } else {
       // When the cursor is over the edge-peeked cat, keep the mascot under it
       // while restoring the normal window size. This prevents the cat from
@@ -49,9 +81,11 @@ else {
       const cursor = screen.getCursorScreenPoint();
       const cursorInside = cursor.x >= bounds.x && cursor.x <= bounds.x + bounds.width
         && cursor.y >= bounds.y && cursor.y <= bounds.y + bounds.height;
-      const x = cursorInside ? cursor.x - 150 : bounds.x;
-      const y = cursorInside ? cursor.y - 209 : bounds.y;
-      window.setBounds(clampBounds({ x, y, width: 300, height: 340 }, area));
+      const restored = cursorInside
+        ? { x: cursor.x - 150, y: cursor.y - 209, width: 300, height: 340 }
+        : prePeekBounds || { x: bounds.x, y: bounds.y, width: 300, height: 340 };
+      window.setBounds(clampBounds(restored, area));
+      prePeekBounds = null;
     }
     window.webContents.send('peek-state', peeked);
     return peeked;
@@ -62,10 +96,27 @@ else {
     stopJump();
     stopWalk();
     const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
-    const left = area.x; const right = area.x + area.width - bounds.width; if (right <= left) return false;
+    const path = planWalkPath(bounds, area); if (!path.length) return false;
     walkMotionId = motionId;
-    const direction = right - bounds.x >= bounds.x - left ? 1 : -1; window.webContents.send('walk-state', true, motionId);
-    walkTimer = setInterval(() => { if (!window || window.isDestroyed()) return stopWalk(); const current = window.getPosition(); const x = Math.max(left, Math.min(right, current[0] + direction * 4)); window.setPosition(x, Math.max(area.y, Math.min(area.y + area.height - bounds.height, current[1])), false); if (x === left || x === right) stopWalk(); }, 30);
+    let targetIndex = 0;
+    window.webContents.send('walk-state', true, motionId);
+    window.webContents.send('walk-direction', Math.sign(path[0].x - bounds.x), motionId);
+    walkTimer = setInterval(() => {
+      if (!window || window.isDestroyed()) return stopWalk();
+      const [x, y] = window.getPosition();
+      const target = path[targetIndex];
+      const dx = target.x - x;
+      const dy = target.y - y;
+      const distance = Math.hypot(dx, dy);
+      if (distance <= 5) {
+        window.setPosition(target.x, target.y, false);
+        targetIndex += 1;
+        if (targetIndex === path.length) return stopWalk();
+        window.webContents.send('walk-direction', Math.sign(path[targetIndex].x - target.x), motionId);
+        return;
+      }
+      window.setPosition(Math.round(x + dx / distance * 5), Math.round(y + dy / distance * 5), false);
+    }, 30);
     return true;
   }
   function startJump(motionId) {
@@ -168,7 +219,7 @@ else {
     tray.setContextMenu(Menu.buildFromTemplate([{ label: '显示东东', click: showWindow }, { label: '设置', click: () => openPanel('settings') }, { type: 'separator' }, { label: '退出', click: quitApp }])); tray.on('click', showWindow);
   }
   function createWindow() {
-    window = new BrowserWindow({ width: 420, height: 700, minWidth: 280, minHeight: 300, icon: path.join(__dirname, '..', 'assets', 'icon.png'), frame: false, transparent: true, alwaysOnTop: true, resizable: false, hasShadow: false, skipTaskbar: false, backgroundColor: '#00000000', show: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    window = new BrowserWindow({ width: 420, height: 700, minWidth: 138, minHeight: 176, icon: path.join(__dirname, '..', 'assets', 'icon.png'), frame: false, transparent: true, alwaysOnTop: true, resizable: false, hasShadow: false, skipTaskbar: false, backgroundColor: '#00000000', show: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
     window.loadFile(path.join(__dirname, '..', 'public', 'index.html')); window.on('close', event => { if (!isQuitting) { event.preventDefault(); window.hide(); } }); window.on('closed', () => { stopWalk(); stopJump(); window = null; }); window.on('move', clampWindow);
   }
   app.on('second-instance', showWindow);
@@ -191,6 +242,7 @@ else {
       if (next.x !== clamped.x || next.y !== clamped.y) window.setPosition(clamped.x, clamped.y, false);
     });
     ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', (_event, motionId) => startWalk(motionId)); ipcMain.handle('stop-walk', () => stopWalk()); ipcMain.handle('start-jump', (_event, motionId) => startJump(motionId)); ipcMain.handle('stop-jump', () => stopJump());
+    ipcMain.handle('scan-peers', () => scanTailnetPeers());
     ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) { stopWalk(); stopJump(); } return isOnline; }); ipcMain.handle('set-ignore-mouse-events', (_event, ignore, options = {}) => window?.setIgnoreMouseEvents(Boolean(ignore), { forward: options.forward !== false }));
     ipcMain.handle('set-peeked', (_event, next) => setPeeked(next));
     ipcMain.handle('open-panel', (_event, kind) => openPanel(kind));

@@ -29,6 +29,7 @@ function waitFor(socket, predicate) {
 test('v3 sessions authenticate, pair one guest, personalize presence, and publish events', async () => {
   const ctx = await setup();
   try {
+    assert.deepEqual(await (await fetch(`${ctx.base}/api/discover`)).json(), { app: 'dongdong', protocol: '3' });
     assert.equal((await fetch(`${ctx.base}/api/events`)).status, 401);
     assert.equal((await fetch(`${ctx.base}/api/session`, { method: 'POST', headers: { 'X-Pet-Key': 'bad', 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
     const host = await ctx.session('host', 'host', '甲');

@@ -113,7 +113,8 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
     sessions.set(token, session); sendPresence();
     res.status(201).json({ token, senderId, senderName, mode, profile, presence: presenceFor(session) });
   });
-  app.use('/api', (req, res, next) => req.path === '/session' ? next() : requireSession(req, res, next));
+  app.get('/api/discover', (_req, res) => res.json({ app: 'dongdong', protocol: PROTOCOL_VERSION }));
+  app.use('/api', (req, res, next) => req.path === '/session' || req.path === '/discover' ? next() : requireSession(req, res, next));
   app.get('/api/events', (_req, res) => res.json(events));
 
   function validateDelivery(body) {

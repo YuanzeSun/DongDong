@@ -25,6 +25,9 @@
 .window.compact .mascot-button { margin-bottom: 5px; }
 .mascot-button { cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
 .mascot-button:active { cursor: grabbing; }
+.voice-bubble { position: absolute; right: -36px; top: 3px; z-index: 4; max-width: 92px; padding: 5px 8px; border: 1px solid #d6e8df; border-radius: 8px; background: #fffefa; color: #3d6c5c; box-shadow: 0 3px 9px #24452d26; font-size: 12px; font-weight: 750; white-space: nowrap; pointer-events: none; animation: voice-appear .2s ease-out; }
+.voice-bubble::after { content: ''; position: absolute; left: -5px; bottom: 7px; width: 8px; height: 8px; transform: rotate(45deg); border-left: 1px solid #d6e8df; border-bottom: 1px solid #d6e8df; background: #fffefa; }
+@keyframes voice-appear { from { opacity: 0; transform: translateY(4px) scale(.92); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .window.compact .compact-actions {
   height: 55px; min-height: 55px; padding: 4px 5px 6px; margin: 0 8px 5px;
   background: transparent; border: 0; border-radius: 0;
@@ -45,6 +48,7 @@
 .window.compact .companion-main:hover .couple-badge,
 .window.compact .companion-main:hover .compact-actions,
 .window.compact .companion:has(.companion-main:hover) .compact-actions,
+.window.compact:has(.action-tray:not([hidden])) .compact-actions,
 .window.compact .compact-actions:hover,
 .window.compact .companion-main:hover .floor-shadow,
 .window.compact:focus-within .speech,
@@ -107,6 +111,7 @@
   pointer-events: auto;
 }
 .window.peeked .speech,
+.window.peeked .voice-bubble,
 .window.peeked .couple-badge,
 .window.peeked .floor-shadow,
 .window.peeked .compact-actions { display: none; }
@@ -128,6 +133,22 @@
 .action-tray { position: absolute; left: 7px; right: 7px; bottom: 57px; z-index: 8; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 8px; background: #fbfffcf5; border: 1px solid #dbe8df; border-radius: 8px; box-shadow: 0 8px 22px #2048312b; }
 .action-choice { min-width: 0; height: 43px; padding: 3px 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; border-radius: 5px; background: #edf7f1; color: #3c6756; font-size: 10px; font-weight: 700; }
 .action-choice:hover { background: #dff1e7; color: #b85446; }
+.action-close { background: #f3f5f2; color: #698477; }
+.scan-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #547067; font-size: 11px; font-weight: 700; }
+.scan-heading button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: #287b65; font-size: 11px; font-weight: 750; padding: 4px; }
+.scan-heading button:hover { color: #b85446; }
+.scan-heading button img { width: 15px; height: 15px; filter: invert(36%) sepia(36%) saturate(743%) hue-rotate(110deg); }
+.scan-results { display: grid; max-height: 142px; overflow-y: auto; border: 1px solid #d9e7de; border-radius: 6px; background: #fff; }
+.scan-results > button { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; min-height: 42px; border: 0; border-bottom: 1px solid #edf3ee; background: transparent; padding: 6px 9px; text-align: left; color: #355b4c; }
+.scan-results > button:last-child { border-bottom: 0; }
+.scan-results > button:hover, .scan-results > button.selected { background: #e9f6ee; }
+.scan-results > button:disabled { opacity: .5; cursor: default; }
+.scan-results .scan-device { display: grid; min-width: 0; gap: 2px; }
+.scan-results .scan-device strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.scan-results .scan-device small { color: #819b8d; font-size: 10px; }
+.scan-results .scan-room { flex: none; color: #23866d; font-size: 10px; font-weight: 750; }
+.scan-results .scan-room.muted { color: #8da399; font-weight: 500; }
+.scan-results .scan-message { margin: 0; padding: 9px; color: #819b8d; font-size: 11px; line-height: 1.4; }
 .action-choice span { font-size: 15px; line-height: 17px; }
 .action-choice img { width: 16px; height: 16px; }
 .mascot { position: relative; }

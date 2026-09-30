@@ -19,3 +19,18 @@ test('sleep wakes before standing, and walk changes leg positions', () => {
   assert.equal(normalize('walk-2'), 'walk');
   assert.equal(normalize('nap'), 'sleep');
 });
+
+test('resting poses and purr use distinct silhouettes and rise transitions', () => {
+  assert.equal(sample('loaf', 0).loafArt, true);
+  assert.equal(sample('purr', 0).loafArt, true);
+  assert.equal(sample('purr', 0).prop, '');
+  assert.equal(sample('nest', 0).sleepArt, true);
+  assert.equal(sample('nest', 0).bedArt, true);
+  assert.equal(sample('loaf-enter', 0).loafArt, undefined);
+  assert.equal(sample('loaf-enter', ACTIONS['loaf-enter'].frames - 1).loafArt, true);
+  assert.equal(sample('loaf-rise', 0).loafArt, true);
+  assert.equal(sample('loaf-rise', ACTIONS['loaf-rise'].frames - 1).loafArt, undefined);
+  assert.equal(sample('nest-rise', 0).bedArt, true);
+  assert.equal(sample('nest-rise', ACTIONS['nest-rise'].frames - 1).bedArt, undefined);
+  assert.notDeepEqual(sample('purr', 0), sample('purr', Math.floor(ACTIONS.purr.frames / 4)));
+});
