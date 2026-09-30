@@ -11,7 +11,7 @@ const state = {
   mode: 'host', url: '', key: '', token: '', name: '', socket: null,
   connected: false, roomConnection: 'closed', expanded: false, pinned: true, view: 'chat', peerOnline: false,
   peerName: '对方', profile: {},
-  reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, pose: 'idle',
+  reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, jumping: false, pose: 'idle',
   idleActions: JSON.parse(localStorage.getItem('dongdong-idle-actions') ?? 'true'),
   peeked: false, edgeHold: false, edgeAutoOuting: false,
   notifications: JSON.parse(localStorage.getItem('dongdong-notifications') ?? 'true')
@@ -21,6 +21,7 @@ let poseTimer;
 let napTimer;
 let blinkTimer;
 let walkFrameTimer;
+let wakeTimer;
 let peekTimer;
 let peekOutingTimer;
 let edgeHoldTimer;
@@ -65,9 +66,11 @@ function updateConnectionStatus() {
 }
 
 function setPose(pose) {
+  clearTimeout(wakeTimer);
+  wakeTimer = null;
   state.pose = pose;
   const pet = $('mainMascot');
-  pet.classList.remove('wiggle', 'happy', 'jump', 'nap', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'delivery', 'receive', 'speech-pop', 'hug', 'kiss', 'groom', 'purr');
+  pet.classList.remove('wiggle', 'happy', 'jump', 'nap', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'delivery', 'receive', 'speech-pop', 'hug', 'kiss', 'groom', 'purr', 'waking');
   // Keep the sprite visible even when a logical action has no dedicated art.
   // A missing background image makes the transparent mascot look like it
   // vanished mid-action, which is especially jarring for remote gestures.
@@ -83,6 +86,25 @@ function setPose(pose) {
   if (pose === 'happy') pet.classList.add('happy');
   if (pose === 'nap' || pose === 'sleep') pet.classList.add('nap', 'sleep');
   if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(pose)) pet.classList.add(pose);
+}
+
+function wakeThen(callback) {
+  clearTimeout(wakeTimer);
+  wakeTimer = null;
+  const pet = $('mainMascot');
+  if (!['nap', 'sleep'].includes(state.pose)) return callback();
+  setPose('idle');
+  pet.classList.add('waking');
+  wakeTimer = setTimeout(() => {
+    wakeTimer = null;
+    pet.classList.remove('waking');
+    callback();
+  }, 240);
+}
+
+function transitionPose(pose) {
+  if (['nap', 'sleep'].includes(pose)) return setPose(pose);
+  wakeThen(() => setPose(pose));
 }
 
 function scheduleNap() {
@@ -195,7 +217,7 @@ function setPeerOnline(online) {
   $('presenceDot').classList.toggle('offline', !state.peerOnline);
   updateConnectionStatus();
   if (state.peerOnline) {
-    if (state.pose === 'nap') setPose('idle');
+    if (state.pose === 'nap' || state.pose === 'sleep') transitionPose('idle');
     scheduleIdleAction();
   } else {
     clearTimeout(state.idleTimer);
@@ -205,49 +227,56 @@ function setPeerOnline(online) {
 
 function animatePet(kind = 'happy') {
   clearTimeout(poseTimer);
-  setPose(kind === 'wiggle' ? 'wave' : 'happy');
-  const pet = $('mainMascot');
-  pet.classList.remove('wiggle', 'happy', 'jump');
-  void pet.offsetWidth;
-  pet.classList.add(kind === 'jump' ? 'jump' : kind);
-  poseTimer = setTimeout(() => setPose(state.peerOnline ? 'idle' : 'nap'), kind === 'jump' ? 2200 : 1500);
+  clearTimeout(napTimer);
+  clearTimeout(state.idleTimer);
+  const target = kind === 'wiggle' ? 'wave' : 'happy';
+  transitionPose(target);
+  poseTimer = setTimeout(() => transitionPose(state.peerOnline ? 'idle' : 'nap'), 1500);
   if (state.peerOnline) scheduleNap();
 }
 
 function animateDelivery(progress = 1) {
   clearTimeout(poseTimer);
   clearTimeout(deliveryFinishTimer);
-  const pet = $('mainMascot');
-  setPose('idle');
-  pet.classList.remove('delivery');
-  void pet.offsetWidth;
-  pet.style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, progress))));
-  pet.classList.add('delivery');
-  deliveryFinishTimer = setTimeout(() => { pet.classList.remove('delivery'); setPose(state.peerOnline ? 'idle' : 'nap'); }, 2600);
+  wakeThen(() => {
+    const pet = $('mainMascot');
+    setPose('idle');
+    pet.classList.remove('delivery');
+    void pet.offsetWidth;
+    pet.style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, progress))));
+    pet.classList.add('delivery');
+    deliveryFinishTimer = setTimeout(() => { pet.classList.remove('delivery'); transitionPose(state.peerOnline ? 'idle' : 'nap'); }, 2600);
+  });
 }
 
 function animateReceive() {
   clearTimeout(poseTimer);
   clearTimeout(deliveryFinishTimer);
-  const pet = $('mainMascot');
-  setPose('idle');
-  pet.classList.remove('receive');
-  void pet.offsetWidth;
-  pet.classList.add('receive');
-  poseTimer = setTimeout(() => { pet.classList.remove('receive'); setPose(state.peerOnline ? 'idle' : 'nap'); }, 1600);
+  wakeThen(() => {
+    const pet = $('mainMascot');
+    setPose('idle');
+    pet.classList.remove('receive');
+    void pet.offsetWidth;
+    pet.classList.add('receive');
+    poseTimer = setTimeout(() => { pet.classList.remove('receive'); transitionPose(state.peerOnline ? 'idle' : 'nap'); }, 1600);
+  });
 }
 
 function animateRemoteAction(kind) {
   if (kind === 'sleep') {
-    setPose('nap');
+    transitionPose('nap');
     return;
   }
-  const pet = $('mainMascot');
   clearTimeout(poseTimer);
-  setPose(kind);
-  void pet.offsetWidth;
-  pet.classList.add(kind);
-  poseTimer = setTimeout(() => setPose(state.peerOnline ? 'idle' : 'nap'), kind === 'jump' ? 2200 : 1800);
+  clearTimeout(napTimer);
+  clearTimeout(state.idleTimer);
+  transitionPose(kind);
+  poseTimer = setTimeout(() => transitionPose(state.peerOnline ? 'idle' : 'nap'), kind === 'jump' ? 2200 : 1800);
+}
+
+function animateWalkFallback() {
+  onWalkState(true);
+  setTimeout(() => { if (state.walking) onWalkState(false); }, 1600);
 }
 
 function animateLocalAction(kind) {
@@ -255,12 +284,13 @@ function animateLocalAction(kind) {
   clearTimeout(state.idleTimer);
   clearTimeout(poseTimer);
   if (kind === 'walk') {
-    const animateInPlace = () => {
-      onWalkState(true);
-      setTimeout(() => { if (state.walking) onWalkState(false); }, 1600);
-    };
-    if (desktop) Promise.resolve(desktop.startWalk()).then(started => { if (!started) animateInPlace(); }).catch(animateInPlace);
-    else animateInPlace();
+    if (desktop) Promise.resolve(desktop.startWalk()).then(started => { if (!started) animateWalkFallback(); }).catch(animateWalkFallback);
+    else animateWalkFallback();
+    return;
+  }
+  if (kind === 'jump') {
+    if (desktop) Promise.resolve(desktop.startJump()).then(started => { if (!started) animateRemoteAction('jump'); }).catch(() => animateRemoteAction('jump'));
+    else animateRemoteAction('jump');
     return;
   }
   if (kind === 'wave') {
@@ -331,14 +361,35 @@ function onWalkState(walking) {
   if (walking) {
     clearTimeout(poseTimer);
     clearTimeout(napTimer);
-    let frame = 1;
-    setPose('walk-1');
-    walkFrameTimer = setInterval(() => { frame = frame === 1 ? 2 : 1; setPose(`walk-${frame}`); }, 180);
-    speak('出门散步啦', 'alert');
+    wakeThen(() => {
+      if (!state.walking) return;
+      let frame = 1;
+      setPose('walk-1');
+      walkFrameTimer = setInterval(() => { frame = frame === 1 ? 2 : 1; setPose(`walk-${frame}`); }, 180);
+      speak('出门散步啦', 'alert');
+    });
   } else if (state.connected) {
-    setPose('idle');
+    transitionPose('idle');
     if (state.edgeAutoOuting) setTimeout(finishPeekOuting, 1800);
     else scheduleNap();
+  }
+}
+
+function onJumpState(jumping) {
+  state.jumping = jumping;
+  if (jumping) {
+    clearTimeout(poseTimer);
+    clearTimeout(napTimer);
+    clearTimeout(state.idleTimer);
+    wakeThen(() => {
+      if (!state.jumping) return;
+      setPose('jump');
+      speak('跳起来啦', 'alert');
+    });
+  } else if (!state.walking) {
+    clearTimeout(poseTimer);
+    transitionPose(state.connected && state.peerOnline ? 'idle' : 'nap');
+    if (state.connected) scheduleNap();
   }
 }
 
@@ -503,8 +554,14 @@ function onEvent(event) {
   // mirrors the live event stream, otherwise opening it would duplicate effects.
   if (panelMode) return;
   const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
-  if (event.kind === 'walk' && desktop && !panelMode) desktop.startWalk();
-  else if (event.kind === 'walk') animateRemoteAction('happy');
+  if (event.kind === 'walk' && desktop && !panelMode) {
+    Promise.resolve(desktop.startWalk()).then(started => { if (!started) animateWalkFallback(); }).catch(animateWalkFallback);
+  }
+  else if (event.kind === 'walk') animateWalkFallback();
+  else if (event.kind === 'jump' && desktop && !panelMode) {
+    Promise.resolve(desktop.startJump()).then(started => { if (!started) animateRemoteAction('jump'); }).catch(() => animateRemoteAction('jump'));
+  }
+  else if (event.kind === 'jump' && !panelMode) animateRemoteAction('jump');
   else if (event.kind === 'wave') animatePet('wiggle');
   else if (actionText[event.kind]) animateRemoteAction(event.kind);
   if (event.senderId !== senderId) {
@@ -611,6 +668,7 @@ async function disconnect() {
   state.connected = false;
   state.roomConnection = 'closed';
   if (state.walking) await desktop?.stopWalk();
+  if (state.jumping) await desktop?.stopJump();
   clearInterval(walkFrameTimer);
   clearTimeout(poseTimer);
   clearTimeout(napTimer);
@@ -840,6 +898,7 @@ async function init() {
     triggerAction(button.dataset.action);
   }));
   if (desktop) desktop.onWalkState(onWalkState);
+  if (desktop?.onJumpState) desktop.onJumpState(onJumpState);
   if (desktop?.onPeekState) desktop.onPeekState(peeked => {
     state.peeked = Boolean(peeked);
     $('window').classList.toggle('peeked', state.peeked);

@@ -11,13 +11,22 @@ const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 else {
-  let window; let tray; let room; let walkTimer; let isQuitting = false; let isOnline = true; let peeked = false;
+  let window; let tray; let room; let walkTimer; let jumpTimer; let isQuitting = false; let isOnline = true; let peeked = false;
   // The mascot window is intentionally independent from these regular utility windows. Closing
   // a panel must never hide the mascot, and closing the mascot must not tear down a panel.
   const panelWindows = new Map();
   const savedDownloads = new Set(); const menuListeners = new Set();
   const sendMenuAction = action => { for (const listener of menuListeners) listener(action); };
-  function stopWalk() { if (walkTimer) clearInterval(walkTimer); walkTimer = null; if (window && !window.isDestroyed()) window.webContents.send('walk-state', false); }
+  function stopWalk() {
+    if (walkTimer) clearInterval(walkTimer);
+    walkTimer = null;
+    if (window && !window.isDestroyed()) window.webContents.send('walk-state', false);
+  }
+  function stopJump() {
+    if (jumpTimer) clearInterval(jumpTimer);
+    jumpTimer = null;
+    if (window && !window.isDestroyed()) window.webContents.send('jump-state', false);
+  }
   function setPeeked(next) {
     if (!window || window.isDestroyed()) return false;
     peeked = Boolean(next);
@@ -43,11 +52,42 @@ else {
   }
   function clampWindow() { if (!window || window.isDestroyed()) return; const area = screen.getDisplayMatching(window.getBounds()).workArea; window.setBounds(clampBounds(window.getBounds(), area)); }
   function startWalk() {
-    if (!isOnline || !window || window.isDestroyed()) return false; stopWalk();
+    if (!window || window.isDestroyed()) return false;
+    stopJump();
+    stopWalk();
     const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
     const left = area.x; const right = area.x + area.width - bounds.width; if (right <= left) return false;
     const direction = right - bounds.x >= bounds.x - left ? 1 : -1; window.webContents.send('walk-state', true);
-    walkTimer = setInterval(() => { if (!isOnline || !window || window.isDestroyed()) return stopWalk(); const current = window.getPosition(); const x = Math.max(left, Math.min(right, current[0] + direction * 4)); window.setPosition(x, Math.max(area.y, Math.min(area.y + area.height - bounds.height, current[1])), false); if (x === left || x === right) stopWalk(); }, 30);
+    walkTimer = setInterval(() => { if (!window || window.isDestroyed()) return stopWalk(); const current = window.getPosition(); const x = Math.max(left, Math.min(right, current[0] + direction * 4)); window.setPosition(x, Math.max(area.y, Math.min(area.y + area.height - bounds.height, current[1])), false); if (x === left || x === right) stopWalk(); }, 30);
+    return true;
+  }
+  function startJump() {
+    if (!window || window.isDestroyed()) return false;
+    stopWalk();
+    stopJump();
+    const start = window.getBounds();
+    const area = screen.getDisplayMatching(start).workArea;
+    const left = area.x;
+    const right = area.x + area.width - start.width;
+    const bottom = area.y + area.height - start.height;
+    const distance = Math.min(180, Math.max(72, Math.round(area.width * 0.12)));
+    const direction = start.x - left < right - start.x ? 1 : -1;
+    const targetX = Math.max(left, Math.min(right, start.x + direction * distance));
+    const duration = 920;
+    const launchedAt = Date.now();
+    window.webContents.send('jump-state', true);
+    jumpTimer = setInterval(() => {
+      if (!window || window.isDestroyed()) return stopJump();
+      const progress = Math.min(1, (Date.now() - launchedAt) / duration);
+      const x = Math.round(start.x + (targetX - start.x) * progress);
+      const arc = Math.sin(Math.PI * progress) * Math.min(96, Math.max(48, area.height * 0.12));
+      const y = Math.round(Math.max(area.y, Math.min(bottom, start.y - arc)));
+      window.setPosition(x, y, false);
+      if (progress >= 1) {
+        window.setPosition(targetX, Math.max(area.y, Math.min(bottom, start.y)), false);
+        stopJump();
+      }
+    }, 30);
     return true;
   }
   function tailscaleAddresses() { return Object.entries(os.networkInterfaces()).flatMap(([name, addresses]) => addresses.filter(item => { if (item.family !== 'IPv4' || item.internal) return false; const parts = item.address.split('.').map(Number); return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127; }).map(item => ({ name, address: item.address }))); }
@@ -71,7 +111,7 @@ else {
     } catch (error) { console.warn('Could not enable auto-launch:', error); }
   }
   function showWindow() { if (!window || window.isDestroyed()) return; window.show(); window.focus(); sendMenuAction('show'); }
-  function quitApp() { isQuitting = true; stopWalk(); for (const panel of panelWindows.values()) if (!panel.isDestroyed()) panel.close(); panelWindows.clear(); if (room) room.close().catch(() => {}); app.quit(); }
+  function quitApp() { isQuitting = true; stopWalk(); stopJump(); for (const panel of panelWindows.values()) if (!panel.isDestroyed()) panel.close(); panelWindows.clear(); if (room) room.close().catch(() => {}); app.quit(); }
   function panelKind(value) {
     const kind = String(value || '').toLowerCase();
     if (!['chat', 'settings'].includes(kind)) throw new Error('辅助窗口类型无效');
@@ -121,7 +161,7 @@ else {
   }
   function createWindow() {
     window = new BrowserWindow({ width: 420, height: 700, minWidth: 280, minHeight: 300, icon: path.join(__dirname, '..', 'assets', 'icon.png'), frame: false, transparent: true, alwaysOnTop: true, resizable: false, hasShadow: false, skipTaskbar: false, backgroundColor: '#00000000', show: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
-    window.loadFile(path.join(__dirname, '..', 'public', 'index.html')); window.on('close', event => { if (!isQuitting) { event.preventDefault(); window.hide(); } }); window.on('closed', () => { stopWalk(); window = null; }); window.on('move', clampWindow);
+    window.loadFile(path.join(__dirname, '..', 'public', 'index.html')); window.on('close', event => { if (!isQuitting) { event.preventDefault(); window.hide(); } }); window.on('closed', () => { stopWalk(); stopJump(); window = null; }); window.on('move', clampWindow);
   }
   app.on('second-instance', showWindow);
   app.whenReady().then(() => {
@@ -129,20 +169,21 @@ else {
     ipcMain.handle('addresses', () => tailscaleAddresses());
     ipcMain.handle('start-host', async (_event, requestedAddress, senderId) => { const address = tailscaleAddresses().find(item => item.address === requestedAddress)?.address; if (!address) throw new Error('没有找到这个 Tailscale 地址，请确认 Tailscale 已连接'); if (room) await room.close(); room = createRoom({ host: address, port: PORT, key: getKey(), hostId: String(senderId || ''), dataDir: path.join(app.getPath('userData'), 'room-v3'), staticDir: path.join(__dirname, '..', 'public') }); try { await room.listen(); } catch (error) { room = null; throw error; } return { url: `http://${address}:${PORT}`, key: getKey() }; });
     ipcMain.handle('stop-host', async () => { if (room) await room.close(); room = null; });
-    ipcMain.handle('window-size', (_event, expanded) => { if (!window || window.isDestroyed()) return; if (expanded) stopWalk(); if (peeked) setPeeked(false); const [width, height] = expanded ? [420, 700] : [300, 340]; const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea; window.setBounds(clampBounds({ x: bounds.x + bounds.width - width, y: bounds.y + bounds.height - height, width, height }, area)); });
+    ipcMain.handle('window-size', (_event, expanded) => { if (!window || window.isDestroyed()) return; if (expanded) { stopWalk(); stopJump(); } if (peeked) setPeeked(false); const [width, height] = expanded ? [420, 700] : [300, 340]; const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea; window.setBounds(clampBounds({ x: bounds.x + bounds.width - width, y: bounds.y + bounds.height - height, width, height }, area)); });
     ipcMain.on('move-window', (_event, dx, dy) => {
       if (!window || window.isDestroyed()) return;
       const deltaX = Number(dx); const deltaY = Number(dy);
       if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
       if (walkTimer) stopWalk();
+      if (jumpTimer) stopJump();
       const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
       window.setPosition(Math.round(bounds.x + deltaX), Math.round(bounds.y + deltaY), false);
       const next = window.getBounds();
       const clamped = clampBounds(next, area);
       if (next.x !== clamped.x || next.y !== clamped.y) window.setPosition(clamped.x, clamped.y, false);
     });
-    ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', () => startWalk()); ipcMain.handle('stop-walk', () => stopWalk());
-    ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) stopWalk(); return isOnline; }); ipcMain.handle('set-ignore-mouse-events', (_event, ignore, options = {}) => window?.setIgnoreMouseEvents(Boolean(ignore), { forward: options.forward !== false }));
+    ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', () => startWalk()); ipcMain.handle('stop-walk', () => stopWalk()); ipcMain.handle('start-jump', () => startJump()); ipcMain.handle('stop-jump', () => stopJump());
+    ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) { stopWalk(); stopJump(); } return isOnline; }); ipcMain.handle('set-ignore-mouse-events', (_event, ignore, options = {}) => window?.setIgnoreMouseEvents(Boolean(ignore), { forward: options.forward !== false }));
     ipcMain.handle('set-peeked', (_event, next) => setPeeked(next));
     ipcMain.handle('open-panel', (_event, kind) => openPanel(kind));
     ipcMain.handle('close-panel', event => closePanel(event.sender));
@@ -154,5 +195,5 @@ else {
     ipcMain.handle('on-menu-action', event => { const listener = action => event.sender.send('menu-action', action); menuListeners.add(listener); event.sender.once('destroyed', () => menuListeners.delete(listener)); return true; });
     createTray(); createWindow();
   });
-  app.on('activate', showWindow); app.on('before-quit', () => { isQuitting = true; stopWalk(); }); app.on('window-all-closed', event => { if (!isQuitting && process.platform !== 'darwin') event.preventDefault(); });
+  app.on('activate', showWindow); app.on('before-quit', () => { isQuitting = true; stopWalk(); stopJump(); }); app.on('window-all-closed', event => { if (!isQuitting && process.platform !== 'darwin') event.preventDefault(); });
 }
