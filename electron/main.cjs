@@ -45,6 +45,23 @@ else {
   function tailscaleAddresses() { return Object.entries(os.networkInterfaces()).flatMap(([name, addresses]) => addresses.filter(item => { if (item.family !== 'IPv4' || item.internal) return false; const parts = item.address.split('.').map(Number); return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127; }).map(item => ({ name, address: item.address }))); }
   function configPath() { return path.join(app.getPath('userData'), 'room-config-v3.json'); }
   function getKey() { try { const key = JSON.parse(fs.readFileSync(configPath(), 'utf8')).key; if (typeof key === 'string' && key.length >= 20) return key; } catch { /* First launch. */ } const key = crypto.randomBytes(24).toString('base64url'); fs.mkdirSync(app.getPath('userData'), { recursive: true }); fs.writeFileSync(configPath(), JSON.stringify({ key }), { mode: 0o600 }); return key; }
+  function autoLaunchPreferencePath() { return path.join(app.getPath('userData'), 'app-settings.json'); }
+  function saveAutoLaunchPreference(enabled) {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    fs.writeFileSync(autoLaunchPreferencePath(), JSON.stringify({ autoLaunch: Boolean(enabled) }), { mode: 0o600 });
+  }
+  function initializeAutoLaunch() {
+    if (!app.isPackaged) return;
+    try {
+      const preference = JSON.parse(fs.readFileSync(autoLaunchPreferencePath(), 'utf8'));
+      if (typeof preference.autoLaunch === 'boolean') return;
+    } catch { /* No saved preference yet. */ }
+    // Apply the default once so later app or system changes are respected.
+    try {
+      app.setLoginItemSettings({ openAtLogin: true, openAsHidden: true });
+      saveAutoLaunchPreference(true);
+    } catch (error) { console.warn('Could not enable auto-launch:', error); }
+  }
   function showWindow() { if (!window || window.isDestroyed()) return; window.show(); window.focus(); sendMenuAction('show'); }
   function quitApp() { isQuitting = true; stopWalk(); for (const panel of panelWindows.values()) if (!panel.isDestroyed()) panel.close(); panelWindows.clear(); if (room) room.close().catch(() => {}); app.quit(); }
   function panelKind(value) {
@@ -100,6 +117,7 @@ else {
   }
   app.on('second-instance', showWindow);
   app.whenReady().then(() => {
+    initializeAutoLaunch();
     ipcMain.handle('addresses', () => tailscaleAddresses());
     ipcMain.handle('start-host', async (_event, requestedAddress, senderId) => { const address = tailscaleAddresses().find(item => item.address === requestedAddress)?.address; if (!address) throw new Error('没有找到这个 Tailscale 地址，请确认 Tailscale 已连接'); if (room) await room.close(); room = createRoom({ host: address, port: PORT, key: getKey(), hostId: String(senderId || ''), dataDir: path.join(app.getPath('userData'), 'room-v3'), staticDir: path.join(__dirname, '..', 'public') }); try { await room.listen(); } catch (error) { room = null; throw error; } return { url: `http://${address}:${PORT}`, key: getKey() }; });
     ipcMain.handle('stop-host', async () => { if (room) await room.close(); room = null; });
@@ -123,7 +141,7 @@ else {
     ipcMain.handle('copy', (_event, value) => clipboard.writeText(String(value).slice(0, 500))); ipcMain.handle('get-downloads-path', () => app.getPath('downloads'));
     ipcMain.handle('save-download', async (_event, data, requestedName) => { const savedPath = await saveUniqueDownload(app.getPath('downloads'), downloadBuffer(data, MAX_DOWNLOAD_BYTES), requestedName); savedDownloads.add(path.resolve(savedPath)); return savedPath; });
     ipcMain.handle('reveal-download', async (_event, requestedPath) => { const resolved = path.resolve(String(requestedPath || '')); if (!savedDownloads.has(resolved)) throw new Error('只能打开本次保存的文件'); await shell.showItemInFolder(resolved); return true; }); ipcMain.handle('open-downloads', () => shell.openPath(app.getPath('downloads')));
-    ipcMain.handle('get-auto-launch', () => app.getLoginItemSettings().openAtLogin); ipcMain.handle('set-auto-launch', (_event, enabled) => { app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true }); return app.getLoginItemSettings().openAtLogin; });
+    ipcMain.handle('get-auto-launch', () => app.getLoginItemSettings().openAtLogin); ipcMain.handle('set-auto-launch', (_event, enabled) => { app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true }); saveAutoLaunchPreference(enabled); return app.getLoginItemSettings().openAtLogin; });
     ipcMain.handle('notify', (_event, title, body) => { if (Notification.isSupported()) new Notification({ title: String(title), body: String(body).slice(0, 140) }).show(); }); ipcMain.handle('close-window', () => window?.hide()); ipcMain.handle('quit-app', quitApp);
     ipcMain.handle('on-menu-action', event => { const listener = action => event.sender.send('menu-action', action); menuListeners.add(listener); event.sender.once('destroyed', () => menuListeners.delete(listener)); return true; });
     createTray(); createWindow();

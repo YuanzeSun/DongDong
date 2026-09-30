@@ -8,7 +8,7 @@ localStorage.setItem('dongdong-sender-id-v3', senderId);
 
 const state = {
   mode: 'host', url: '', key: '', token: '', name: '', socket: null,
-  connected: false, expanded: false, pinned: true, view: 'chat', peerOnline: false,
+  connected: false, roomConnection: 'closed', expanded: false, pinned: true, view: 'chat', peerOnline: false,
   peerName: '对方', profile: {},
   reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, pose: 'idle',
   idleActions: JSON.parse(localStorage.getItem('dongdong-idle-actions') ?? 'true'),
@@ -55,6 +55,12 @@ function toast(message) {
 function setStatus(text, kind = '') {
   $('status').textContent = text;
   $('status').className = `status ${kind}`;
+}
+
+function updateConnectionStatus() {
+  if (!state.connected) return setStatus('待连接');
+  if (state.roomConnection !== 'online') return setStatus(state.roomConnection === 'reconnecting' ? '重连中' : '正在连接', 'offline');
+  setStatus(state.peerOnline ? '已连接' : '对方离线', state.peerOnline ? 'online' : 'offline');
 }
 
 function setPose(pose) {
@@ -176,6 +182,7 @@ function setPeerOnline(online) {
   $('presenceText').textContent = state.peerOnline ? `${state.peerName} 在线` : `${state.peerName} 离线，小猫正在休息`;
   $('presenceDot').classList.toggle('online', state.peerOnline);
   $('presenceDot').classList.toggle('offline', !state.peerOnline);
+  updateConnectionStatus();
   if (state.peerOnline) {
     if (state.pose === 'nap') setPose('idle');
     scheduleIdleAction();
@@ -506,13 +513,16 @@ function openSocket() {
   const socket = new WebSocket(`${state.url.replace(/^http/, 'ws')}/ws?v=3&session=${encodeURIComponent(state.token)}`);
   state.socket = socket;
   socket.onopen = async () => {
-    setStatus('已连接', 'online');
+    if (!state.connected || state.socket !== socket) return socket.close();
+    state.roomConnection = 'online';
+    updateConnectionStatus();
     try {
       const response = await request('/events');
       for (const event of await response.json()) onEvent(event);
     } catch { /* The socket's close handler will retry if the room went away. */ }
   };
   socket.onmessage = message => {
+    if (!state.connected || state.socket !== socket) return;
     const payload = JSON.parse(message.data);
     if (payload.type === 'event') onEvent(payload.event);
     if (payload.type === 'presence') setPeerOnline(payload);
@@ -520,8 +530,8 @@ function openSocket() {
   };
   socket.onclose = () => {
     if (!state.connected || state.socket !== socket) return;
+    state.roomConnection = 'reconnecting';
     setPeerOnline(false);
-    setStatus('重连中', 'offline');
     clearTimeout(state.reconnectTimer);
     state.reconnectTimer = setTimeout(openSocket, 2500);
   };
@@ -538,6 +548,7 @@ async function connect(url, key, name, mode) {
   const response = await request('/events');
   const events = await response.json();
   state.connected = true;
+  state.roomConnection = 'connecting';
   $('setup').hidden = true;
   $('companion').hidden = false;
   $('pinButton').hidden = !desktop;
@@ -569,7 +580,7 @@ async function connect(url, key, name, mode) {
     setView('chat');
     setExpanded(!desktop);
   }
-  setStatus('已连接', 'online');
+  updateConnectionStatus();
   setPose('idle');
   scheduleNap();
   clearInterval(blinkTimer);
@@ -587,6 +598,7 @@ async function connect(url, key, name, mode) {
 async function disconnect() {
   try { if (state.token) await request('/leave', { method: 'POST' }); } catch { /* Room may already be gone. */ }
   state.connected = false;
+  state.roomConnection = 'closed';
   if (state.walking) await desktop?.stopWalk();
   clearInterval(walkFrameTimer);
   clearTimeout(poseTimer);
@@ -615,7 +627,7 @@ async function disconnect() {
   $('pinButton').hidden = true;
   $('settingsButton').hidden = false;
   state.peerOnline = false;
-  setStatus('待连接');
+  updateConnectionStatus();
   if (desktop && !panelMode) desktop.setWindowSize(true);
   if (panelMode) desktop?.closePanel();
 }
