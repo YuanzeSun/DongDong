@@ -28,7 +28,15 @@ else {
       const x = rightSide ? area.x + area.width - width : area.x;
       window.setBounds(clampBounds({ x, y: Math.max(area.y, area.y + area.height - height - 36), width, height }, area));
     } else {
-      window.setBounds(clampBounds({ x: bounds.x, y: bounds.y, width: 300, height: 340 }, area));
+      // When the cursor is over the edge-peeked cat, keep the mascot under it
+      // while restoring the normal window size. This prevents the cat from
+      // jumping away as soon as hover interaction begins.
+      const cursor = screen.getCursorScreenPoint();
+      const cursorInside = cursor.x >= bounds.x && cursor.x <= bounds.x + bounds.width
+        && cursor.y >= bounds.y && cursor.y <= bounds.y + bounds.height;
+      const x = cursorInside ? cursor.x - 150 : bounds.x;
+      const y = cursorInside ? cursor.y - 209 : bounds.y;
+      window.setBounds(clampBounds({ x, y, width: 300, height: 340 }, area));
     }
     window.webContents.send('peek-state', peeked);
     return peeked;

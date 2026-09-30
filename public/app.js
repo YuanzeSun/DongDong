@@ -758,8 +758,18 @@ async function init() {
     triggerAction('pet');
   });
   const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: false, suppressClick: false };
+  const finishMascotDrag = event => {
+    const pointerId = mascotDrag.pointerId;
+    if (pointerId === null || (event?.pointerId != null && pointerId !== event.pointerId)) return;
+    mascotDrag.pointerId = null;
+    // A real pointer-up must suppress the synthetic click after a drag. Focus
+    // loss/cancellation has no click to suppress and should fully reset state.
+    mascotDrag.suppressClick = event?.type === 'pointerup' || event?.type === 'pointermove'
+      ? mascotDrag.moved : false;
+    try { $('mascotButton').releasePointerCapture?.(pointerId); } catch { /* Capture may already be gone. */ }
+  };
   $('mascotButton').addEventListener('pointerdown', event => {
-    if (event.button !== 0 || !desktop?.moveWindow) return;
+    if (event.button !== 0 || !desktop?.moveWindow || mascotDrag.pointerId !== null) return;
     mascotDrag.pointerId = event.pointerId;
     mascotDrag.startX = event.screenX;
     mascotDrag.startY = event.screenY;
@@ -771,6 +781,9 @@ async function init() {
   });
   $('mascotButton').addEventListener('pointermove', event => {
     if (mascotDrag.pointerId !== event.pointerId) return;
+    // A lost pointer-up can otherwise leave the renderer moving the window on
+    // every subsequent move. Browsers report buttons=0 once the press ended.
+    if (event.buttons === 0) return finishMascotDrag(event);
     if (!mascotDrag.moved && Math.hypot(event.screenX - mascotDrag.startX, event.screenY - mascotDrag.startY) < 4) return;
     const deltaX = event.screenX - mascotDrag.lastX;
     const deltaY = event.screenY - mascotDrag.lastY;
@@ -781,14 +794,15 @@ async function init() {
     event.preventDefault();
     desktop.moveWindow(deltaX, deltaY);
   });
-  const finishMascotDrag = event => {
-    if (mascotDrag.pointerId !== event.pointerId) return;
-    mascotDrag.pointerId = null;
-    if (mascotDrag.moved) mascotDrag.suppressClick = true;
-    $('mascotButton').releasePointerCapture?.(event.pointerId);
-  };
   $('mascotButton').addEventListener('pointerup', finishMascotDrag);
   $('mascotButton').addEventListener('pointercancel', finishMascotDrag);
+  $('mascotButton').addEventListener('lostpointercapture', finishMascotDrag);
+  // Pointer capture is normally enough, but native window moves and app focus
+  // changes can bypass the element. Keep a global release path as a guard.
+  window.addEventListener('pointerup', finishMascotDrag, true);
+  window.addEventListener('pointercancel', finishMascotDrag, true);
+  window.addEventListener('blur', () => finishMascotDrag());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) finishMascotDrag(); });
   $('mascotButton').addEventListener('contextmenu', event => {
     if (!state.connected) return;
     event.preventDefault();
@@ -804,7 +818,6 @@ async function init() {
     if (desktop?.openPanel) desktop.openPanel('settings');
     else { setExpanded(true); setView('connection'); }
   });
-  $('contextDisconnect').addEventListener('click', () => { $('contextMenu').hidden = true; disconnect(); });
   $('mascotButton').addEventListener('mouseenter', unpeek);
   $('mascotButton').addEventListener('focus', unpeek);
   document.addEventListener('click', event => { if (!event.target.closest('#contextMenu')) $('contextMenu').hidden = true; });

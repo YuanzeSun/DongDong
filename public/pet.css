@@ -16,7 +16,7 @@
 .window.compact .context-menu { -webkit-app-region: no-drag; }
 .window.compact .companion-main { height: auto; min-height: 0; flex: 1; }
 .window.compact .mascot-button { margin-bottom: 5px; }
-.mascot-button { cursor: grab; touch-action: none; }
+.mascot-button { cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
 .mascot-button:active { cursor: grabbing; }
 .window.compact .compact-actions {
   height: 55px; min-height: 55px; padding: 4px 5px 6px; margin: 0 8px 5px;
@@ -37,7 +37,7 @@
 .window.compact .companion-main:hover .speech,
 .window.compact .companion-main:hover .couple-badge,
 .window.compact .companion-main:hover .compact-actions,
-.window.compact .companion:hover .compact-actions,
+.window.compact .companion:has(.companion-main:hover) .compact-actions,
 .window.compact .compact-actions:hover,
 .window.compact .companion-main:hover .floor-shadow,
 .window.compact:focus-within .speech,
