@@ -1,14 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-label="跳起来的小橘">
-  <g stroke="#5a3d2d" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M79 48c25-12 34-1 27 11-5 8-15 3-12-5" fill="none"/>
-    <path d="M37 48 30 20l20 15 21-16-3 29" fill="#e89041"/>
-    <path d="M32 47c0-16 13-26 32-26s31 10 31 26v20c0 14-14 23-32 23S32 81 32 67z" fill="#ed9948"/>
-    <path d="M41 56c0-10 9-17 23-17s22 7 22 17v14c0 8-9 13-22 13s-23-5-23-13z" fill="#f5b765" stroke="none"/>
-    <path d="M48 56h9M69 56h9M59 65h8l-4 4zM56 74c4 3 9 3 14 0" fill="none"/>
-    <path d="M38 79 24 94l-9-3 4-8 15-11M82 79l15 14 9-3-4-8-16-10" fill="#efaa58"/>
-    <path d="M45 87 34 105l-10-1 5-10 11-13M75 87l10 18 10-1-5-10-10-13" fill="#efaa58"/>
-    <path d="M44 82h44v8H44z" fill="#55a486"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" shape-rendering="crispEdges" aria-label="小橘像素风跳跃">
+  <title>小橘像素风跳跃</title>
+  <g transform="scale(4)">
+  <!-- springing tail -->
+  <path fill="#3b2b2b" d="M44 32h7V22h4v-7h7v4h2v13h-4v7h-9v4h-7z"/>
+  <path fill="#df873a" d="M47 33h4V24h4v-6h4v2h2v10h-4v6h-7v4h-3z"/>
+  <!-- head -->
+  <path fill="#3b2b2b" d="M9 30V15h4V5h5l8 8h8l7-8h5v10h4v15H9z"/>
+  <path fill="#e49342" d="M12 27V17h4V10h2l6 7h10l6-7h2v7h4v10z"/>
+  <path fill="#f2a261" d="M16 11v5h5zM40 11v5h-5z"/>
+  <path fill="#b95c32" d="M26 14h3v7h-3zM31 13h3v8h-3zM36 14h3v7h-3z"/>
+  <!-- excited face -->
+  <path fill="#2d2530" d="M18 20h6v5h-6zM37 20h6v5h-6z"/>
+  <path fill="#fff1ca" d="M19 21h2v2h-2zM38 21h2v2h-2z"/>
+  <path fill="#f7c77b" d="M15 25h30v7H15z"/>
+  <path fill="#a9524b" d="M28 26h4v3h-4z"/>
+  <path fill="#3b2b2b" d="M9 24h8v1H9zM9 29h8v1H9zM43 24h8v1h-8zM43 29h8v1h-8z"/>
+  <!-- airborne body -->
+  <path fill="#3b2b2b" d="M19 32h31v12h-5v6h-8v-4h-8v4h-8v-6h-6v-7h4z"/>
+  <path fill="#e49342" d="M22 35h25v8h-5v4h-4v-3h-8v3h-5v-4h-6v-5h3z"/>
+  <path fill="#4f9e88" d="M22 33h25v4H22z"/>
+  <path fill="#9ad0a5" d="M29 34h10v2H29z"/>
+  <!-- four paws spread in mid-air -->
+  <path fill="#f2aa59" d="M17 42h8v6h-4v4h-5zM40 42h8v5h-4v4h-5z"/>
+  <path fill="#3b2b2b" d="M14 51h8v2h-8zM39 51h8v2h-8z"/>
+  <!-- jump sparkles and dust below -->
+  <path fill="#e8bc52" d="M8 45h3v3h3v3h-3v3H8v-3H5v-3h3zM53 48h3v3h3v2h-3v3h-3v-3h-3v-2h3z"/>
+  <path fill="#6e8b96" d="M20 59h8v2h-8zM37 57h10v2H37z"/>
+
   </g>
-  <path d="m36 44-5-17 15 12M78 45l3-18-15 12" fill="#f6b060"/>
-  <g fill="#e6a050" stroke="none"><path d="M17 53h7v3h-7zM13 59h5v3h-5zM99 58h6v3h-6zM102 51h7v3h-7z"/></g>
 </svg>
+

@@ -1,10 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-label="呼噜中的小橘">
-  <g stroke="#5a3d2d" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M81 78c23-3 28-18 19-26-7-7-16 0-12 8" fill="none"/><path d="M35 39 28 14l21 14 21-14-4 27" fill="#e89041"/>
-    <path d="M31 40c0-18 13-29 32-29s32 11 32 29v23c0 14-12 23-32 23S31 77 31 63z" fill="#ed9948"/>
-    <path d="M40 58c0-10 9-17 23-17s23 7 23 17v14c0 8-9 13-23 13s-23-5-23-13z" fill="#f5b765" stroke="none"/>
-    <path d="M47 57h9M68 57h9M59 66h8l-4 4zM56 75c4 3 9 3 14 0" fill="none"/>
-    <path d="M40 84h46v8H40z" fill="#55a486"/><path d="M42 86h15v14H42zM68 86h15v14H68z" fill="#efaa58"/>
-  </g><path d="M36 37 31 20l15 10M78 37l3-17-15 10" fill="#f6b060"/>
-  <g fill="none" stroke="#78aa95" stroke-width="3" stroke-linecap="round"><path d="M10 53c-6 5-6 11 0 16"/><path d="M16 55c-4 4-4 8 0 12"/><path d="M110 53c6 5 6 11 0 16"/><path d="M104 55c4 4 4 8 0 12"/></g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" shape-rendering="crispEdges" aria-label="小橘像素风呼噜">
+  <title>小橘像素风呼噜</title>
+  <g transform="scale(4)">
+  <!-- tail behind the body -->
+  <path fill="#3b2b2b" d="M45 47h7v-4h7v3h3v12h-4v4h-8v-4h-5z"/>
+  <path fill="#df873a" d="M48 49h6v-3h3v3h2v7h-3v3h-5v-4h-3z"/>
+  <!-- ears and head silhouette -->
+  <path fill="#3b2b2b" d="M13 22V7h4v-4h4l8 9h8l8-9h4v4h4v15h3v18H10V22z"/>
+  <path fill="#e49342" d="M16 21V10h3l7 8h10l8-8h3v11h4v15H13V21z"/>
+  <path fill="#f2a261" d="M18 11v7h6zM47 11v7h-6z"/>
+  <!-- forehead stripes -->
+  <path fill="#b95c32" d="M27 16h3v7h-3zM32 15h3v8h-3zM37 16h3v7h-3z"/>
+  <!-- muzzle -->
+  <path fill="#f7c77b" d="M18 28h29v9H18z"/>
+  <!-- eyes -->
+  <path fill="#2d2530" d="M19 25h6v5h-6zM39 25h6v5h-6z"/>
+  <path fill="#fff1ca" d="M20 26h2v2h-2zM40 26h2v2h-2z"/>
+  <!-- nose and mouth -->
+  <path fill="#a9524b" d="M30 30h4v3h-4z"/>
+  <path fill="#3b2b2b" d="M31 33h2v3h-2zM27 35h4v2h-4zM33 35h4v2h-4z"/>
+  <!-- whiskers -->
+  <path fill="#3b2b2b" d="M12 30h6v1h-6zM12 34h7v1h-7zM46 30h6v1h-6zM45 34h7v1h-7z"/>
+  <!-- body -->
+  <path fill="#3b2b2b" d="M17 37h33v17H46v7H35v-5H29v5H18v-7h-5V42h4z"/>
+  <path fill="#e49342" d="M20 39h27v13H43v6h-5v-5h-9v5h-7v-6h-4V43h2z"/>
+  <!-- chest and collar -->
+  <path fill="#f7c77b" d="M28 40h11v10H28z"/>
+  <path fill="#4f9e88" d="M22 38h24v4H22z"/>
+  <path fill="#9ad0a5" d="M29 39h10v2H29z"/>
+  <!-- paws -->
+  <path fill="#f2aa59" d="M21 52h7v5h-7zM37 52h7v5h-7z"/>
+  <path fill="#3b2b2b" d="M20 57h9v2h-9zM36 57h9v2h-9z"/>
+  <!-- body stripe -->
+  <path fill="#b95c32" d="M43 42h4v7h-4z"/>
+
+  
+  <path fill="#e49342" d="M18 24h9v8h-9zM38 24h9v8h-9z"/>
+  <path fill="#2d2530" d="M19 28h7v2h-7zM39 28h7v2h-7z"/>
+  <path fill="#6e8b96" d="M7 29h5v2H7zM52 29h5v2h-5zM6 35h6v2H6zM51 35h7v2h-7z"/>
+  <path fill="#e8bc52" d="M28 10h3v-3h2v3h3v2h-3v3h-2v-3h-3z"/>
+  </g>
 </svg>
+
