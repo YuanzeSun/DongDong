@@ -1,21 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" shape-rendering="crispEdges" aria-label="跳起来的像素橘猫">
-  <!-- Tail lifted high to make the airborne pose readable at a small size. -->
-  <path d="M28 20h4v-3h3v-4h2V8h-3v3h-3v4h-3z" fill="#60402e"/>
-  <path d="M30 18h2v-3h2v-4h1v4h-2v4h-3z" fill="#d07839"/>
-  <path d="M8 8h6v4h11V8h6v8h2v8h-2v4h-4v3H13v-3H9v-4H6v-7h2z" fill="#60402e"/>
-  <path d="M10 10h3v5h13v-5h4v7h2v7h-2v3h-4v3H14v-3h-3v-4H8v-5h2z" fill="#ed9a4b"/>
-  <path d="M10 10h3v3h-3zm17 0h3v3h-3z" fill="#f3ad64"/>
-  <path d="M11 12h2v4h-2zm17 0h2v4h-2z" fill="#df8378"/>
-  <path d="M13 14h14v2h4v4h2v5h-2v2H9v-2H7v-5h2v-4h4z" fill="#f5b366"/>
-  <path d="M12 13h4v3h-4zm12 0h4v3h-4z" fill="#f9c27a"/>
-  <path d="M17 15h2v4h-2zm4 0h2v4h-2zM9 21h4v2H9zm18 0h4v2h-4z" fill="#d17a3a"/>
-  <path d="M12 24h3v2h-3zm13 0h3v2h-3z" fill="#f29b8b"/>
-  <path d="M14 25h12v5H14z" fill="#ffeccc"/>
-  <path d="M13 19h2v3h-2zm12 0h2v3h-2z" fill="#4e392d"/>
-  <path d="M19 24h2v2h-2z" fill="#a35b52"/>
-  <path d="M17 26h2v1h-2zm4 0h2v1h-2z" fill="#7c4b39"/>
-  <!-- Paws tucked up while jumping. -->
-  <path d="M10 29h6v3h-2v2h-4v-2H8v-2h2zm14 0h6v3h-2v2h-4v-2h-2v-2h2z" fill="#60402e"/>
-  <path d="M11 30h4v2h-2v1h-2v-2H9v-1h2zm14 0h4v1h-2v2h-2v-2h-1v-1h1z" fill="#f4ab5a"/>
-  <path d="M12 35h5v2h-4v-1h-1zm11 0h5v1h-5z" fill="#f7bd72"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-label="跳起来的小橘">
+  <g stroke="#5a3d2d" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M79 48c25-12 34-1 27 11-5 8-15 3-12-5" fill="none"/>
+    <path d="M37 48 30 20l20 15 21-16-3 29" fill="#e89041"/>
+    <path d="M32 47c0-16 13-26 32-26s31 10 31 26v20c0 14-14 23-32 23S32 81 32 67z" fill="#ed9948"/>
+    <path d="M41 56c0-10 9-17 23-17s22 7 22 17v14c0 8-9 13-22 13s-23-5-23-13z" fill="#f5b765" stroke="none"/>
+    <path d="M48 56h9M69 56h9M59 65h8l-4 4zM56 74c4 3 9 3 14 0" fill="none"/>
+    <path d="M38 79 24 94l-9-3 4-8 15-11M82 79l15 14 9-3-4-8-16-10" fill="#efaa58"/>
+    <path d="M45 87 34 105l-10-1 5-10 11-13M75 87l10 18 10-1-5-10-10-13" fill="#efaa58"/>
+    <path d="M44 82h44v8H44z" fill="#55a486"/>
+  </g>
+  <path d="m36 44-5-17 15 12M78 45l3-18-15 12" fill="#f6b060"/>
+  <g fill="#e6a050" stroke="none"><path d="M17 53h7v3h-7zM13 59h5v3h-5zM99 58h6v3h-6zM102 51h7v3h-7z"/></g>
 </svg>
