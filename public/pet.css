@@ -1,4 +1,4 @@
-.mascot { image-rendering: auto; }
+.mascot { image-rendering: pixelated; }
 .window.compact { background: transparent; border: 0; box-shadow: none; }
 .window.compact .titlebar {
   height: 0; min-height: 0; margin: 0; padding: 0; overflow: visible;
