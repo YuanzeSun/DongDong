@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 const desktop = window.petDesktop;
 const panelKind = desktop?.panelKind || '';
 const panelMode = panelKind === 'chat' || panelKind === 'settings';
+const DEFAULT_PET_NAME = '小橘';
 const SESSION_KEY = 'dongdong-session-v3';
 const senderId = localStorage.getItem('dongdong-sender-id-v3') || crypto.randomUUID();
 localStorage.setItem('dongdong-sender-id-v3', senderId);
@@ -391,8 +392,8 @@ async function request(route, options = {}) {
 }
 
 function applyProfile(profile = {}) {
-  state.profile = { petName: '咚咚', ...profile };
-  $('petNameLabel').textContent = state.profile.petName || '咚咚';
+  state.profile = { petName: DEFAULT_PET_NAME, ...profile };
+  $('petNameLabel').textContent = state.profile.petName || DEFAULT_PET_NAME;
   $('coupleBadge').hidden = !state.connected;
   $('profilePetName').value = state.profile.petName || '';
 }
@@ -504,7 +505,7 @@ function onEvent(event) {
       pendingDeliveries.delete(event.senderId);
       setTimeout(animateReceive, started ? Math.max(0, 650 - (Date.now() - started)) : 0);
     }
-    if (desktop && state.notifications) desktop.notify('咚咚', event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
+    if (desktop && state.notifications) desktop.notify(state.profile.petName || DEFAULT_PET_NAME, event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
   }
 }
 

@@ -40,12 +40,15 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
   const historyPath = path.join(dataDir, 'history.json');
   const pairingPath = path.join(dataDir, 'pairing.json');
   const profilePath = path.join(dataDir, 'profile.json');
-  const defaultProfile = { petName: '咚咚' };
+  const defaultProfile = { petName: '小橘' };
+  const legacyDefaultNames = new Set(['咚咚', 'Dongdong', 'DongDong']);
   let events = readJson(historyPath, []);
   if (!Array.isArray(events)) events = [];
   events = events.filter(event => event && (event.kind === 'message' || event.kind === 'file')).slice(-MAX_EVENTS);
-  let profile = { ...defaultProfile, ...(readJson(profilePath, {}) || {}) };
-  profile = { petName: stringValue(profile.petName, 80) || defaultProfile.petName };
+  const savedProfile = readJson(profilePath, {}) || {};
+  const savedPetName = stringValue(savedProfile.petName, 80);
+  const migratedPetName = legacyDefaultNames.has(savedPetName) ? defaultProfile.petName : savedPetName;
+  let profile = { petName: migratedPetName || defaultProfile.petName };
   const savedPairing = readJson(pairingPath, {});
   let pairedGuest = savedPairing && typeof savedPairing.guestId === 'string' ? { id: savedPairing.guestId, name: stringValue(savedPairing.guestName, 24) || '对方' } : null;
 
@@ -60,6 +63,7 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
   const persistPairing = () => safeWriteJson(pairingPath, pairedGuest ? { guestId: pairedGuest.id, guestName: pairedGuest.name } : {});
   const persistEvents = () => safeWriteJson(historyPath, events);
   const persistProfile = () => safeWriteJson(profilePath, profile);
+  if (savedPetName && migratedPetName !== savedPetName) persistProfile();
 
   app.use((req, res, next) => {
     const origin = req.headers.origin;

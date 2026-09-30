@@ -32,6 +32,7 @@ test('v3 sessions authenticate, pair one guest, personalize presence, and publis
     assert.equal((await fetch(`${ctx.base}/api/events`)).status, 401);
     assert.equal((await fetch(`${ctx.base}/api/session`, { method: 'POST', headers: { 'X-Pet-Key': 'bad', 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
     const host = await ctx.session('host', 'host', '甲');
+    assert.equal(host.profile.petName, '小橘');
     const guest = await ctx.session('guest', 'join', '乙');
     assert.equal('peerStatus' in host.presence, false);
     const thirdResponse = await fetch(`${ctx.base}/api/session`, { method: 'POST', headers: { 'X-Pet-Key': 'test-secret', 'Content-Type': 'application/json' }, body: JSON.stringify({ senderId: 'third', senderName: '丙', mode: 'join' }) });
