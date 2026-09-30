@@ -1,5 +1,4 @@
 .mascot { image-rendering: pixelated; }
-.mascot.nap { animation: breathing 2.4s ease-in-out infinite; }
 .window.compact { background: transparent; border: 0; box-shadow: none; }
 .window.compact .titlebar {
   height: 0; min-height: 0; margin: 0; padding: 0; overflow: visible;
@@ -7,7 +6,11 @@
   box-shadow: none;
 }
 .window.compact .titlebar > * { display: none; }
-.window.compact .companion-main { -webkit-app-region: drag; }
+.window.compact .companion-main {
+  /* Keep pointer events in the renderer. Native drag regions can retain a
+     window drag after the pointer leaves the cat, which starves hover events. */
+  -webkit-app-region: no-drag;
+}
 .window.compact .mascot-button,
 .window.compact .compact-actions,
 .window.compact .context-menu { -webkit-app-region: no-drag; }
@@ -34,6 +37,8 @@
 .window.compact .companion-main:hover .speech,
 .window.compact .companion-main:hover .couple-badge,
 .window.compact .companion-main:hover .compact-actions,
+.window.compact .companion:hover .compact-actions,
+.window.compact .compact-actions:hover,
 .window.compact .companion-main:hover .floor-shadow,
 .window.compact:focus-within .speech,
 .window.compact:focus-within .couple-badge {
@@ -119,25 +124,6 @@
 .action-choice span { font-size: 15px; line-height: 17px; }
 .action-choice img { width: 16px; height: 16px; }
 .mascot { position: relative; }
-.mascot.delivery { animation: carry-envelope .62s ease-in-out infinite; }
-.mascot.delivery::after { content: "✉"; position: absolute; left: 50%; bottom: 24px; color: #d86f58; font-size: 22px; line-height: 1; text-shadow: 0 1px #fff; transform: translateX(-50%); }
-.mascot.receive { animation: receive-envelope .45s ease-in-out 3; }
-.mascot.receive::after { content: "✉"; position: absolute; left: 50%; bottom: 28px; color: #d86f58; font-size: 22px; line-height: 1; text-shadow: 0 1px #fff; transform: translateX(-50%) rotate(-8deg); animation: envelope-pop .45s ease-in-out 3; }
-.mascot.pet::after { content: "♥"; position: absolute; right: 21px; top: 25px; color: #e47e6c; font-size: 21px; animation: heart-pop .7s ease-in-out 2; }
-.mascot.fish::after { content: "🐟"; position: absolute; left: 50%; bottom: 25px; font-size: 20px; transform: translateX(-50%); animation: fish-pop .75s ease-in-out 2; }
-.mascot.sit { transform: translateY(12px) scaleY(.83); transform-origin: bottom center; }
-.mascot.stretch { animation: stretch-cat .9s ease-in-out 2; }
-@keyframes carry-envelope { 0%, 100% { transform: translateX(-3px) translateY(0) rotate(-2deg); } 50% { transform: translateX(3px) translateY(-5px) rotate(2deg); } }
-@keyframes receive-envelope { 0%, 100% { transform: translateX(0); } 45% { transform: translateX(9px) rotate(3deg); } }
-@keyframes envelope-pop { 0%, 100% { opacity: .35; transform: translateX(-50%) scale(.75) rotate(-8deg); } 55% { opacity: 1; transform: translateX(-50%) scale(1.2) rotate(8deg); } }
-@keyframes heart-pop { 0%, 100% { opacity: .25; transform: translateY(5px) scale(.7); } 50% { opacity: 1; transform: translateY(-5px) scale(1.1); } }
-@keyframes fish-pop { 0%, 100% { opacity: .25; transform: translate(-50%, 5px) rotate(-8deg); } 50% { opacity: 1; transform: translate(-50%, -8px) rotate(8deg); } }
-@keyframes stretch-cat { 0%, 100% { transform: scale(1, 1); } 45% { transform: scale(1.13, .9) translateY(6px); } }
-@keyframes breathing {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.025, .985); }
-}
-@media (prefers-reduced-motion: reduce) { .mascot.nap { animation: none; } }
 body.panel-mode {
   display: block;
   min-height: 100vh;
@@ -165,7 +151,8 @@ body.panel-mode .expanded {
   border-top: 0;
 }
 body.panel-mode .view-back-button,
-body.panel-mode .collapse-button {
+body.panel-mode .collapse-button,
+body.panel-mode #pinButton {
   display: none;
 }
 .couple-badge { position:absolute; top:48px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid #dcebe3; border-radius:999px; background:#ffffffd9; color:#4f7565; box-shadow:0 3px 10px #2b4a3614; font-size:10px; z-index:3; white-space:nowrap; }
@@ -184,11 +171,3 @@ body.panel-mode .collapse-button {
 .return-button { display:inline-flex; align-items:center; gap:5px; width:auto; min-width:92px; padding:0 8px; color:#397461; font-size:11px; font-weight:750; }
 .return-button img { width:15px; height:15px; }
 .return-button:hover { background:#e5f4ec; color:#b85446; }
-.mascot.hug { animation:hug-cat .9s ease-in-out 2; }
-.mascot.kiss { animation:kiss-cat .8s ease-in-out 2; }
-.mascot.groom { animation:groom-cat .7s ease-in-out 3; }
-.mascot.purr { animation:purr-cat 1.3s ease-in-out 2; }
-@keyframes hug-cat { 0%,100% { transform:scale(1); } 45% { transform:scale(1.13) rotate(-3deg); } }
-@keyframes kiss-cat { 0%,100% { transform:translateX(0); } 40% { transform:translateX(5px) rotate(5deg); } 70% { transform:translateX(-2px) rotate(-2deg); } }
-@keyframes groom-cat { 0%,100% { transform:rotate(0); } 35% { transform:rotate(-7deg) translateY(2px); } 70% { transform:rotate(7deg) translateY(2px); } }
-@keyframes purr-cat { 0%,100% { transform:scale(1); filter:drop-shadow(0 10px 9px #2b68552b); } 50% { transform:scale(1.04); filter:drop-shadow(0 0 12px #f49c8a88); } }
