@@ -82,7 +82,14 @@
 }
 .quick-close-button:hover { background: #e8f1ec; }
 .quick-close-button img { width: 15px; height: 15px; }
-.window.compact .quick-composer { -webkit-app-region: no-drag; }
+.window.compact .quick-composer {
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 6px;
+  margin: 0;
+  -webkit-app-region: no-drag;
+}
 .window.compact.quick-composing .compact-actions {
   opacity: 1;
   visibility: visible;
@@ -132,6 +139,36 @@
   50% { transform: scale(1.025, .985); }
 }
 @media (prefers-reduced-motion: reduce) { .mascot.nap { animation: none; } }
+body.panel-mode {
+  display: block;
+  min-height: 100vh;
+  background: #e9f1ed;
+}
+body.panel-mode .window {
+  width: 100%;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+body.panel-mode .companion-main,
+body.panel-mode .compact-actions,
+body.panel-mode .action-tray,
+body.panel-mode .quick-composer {
+  display: none !important;
+}
+body.panel-mode .companion {
+  display: flex;
+}
+body.panel-mode .expanded {
+  display: flex !important;
+  flex: 1;
+  border-top: 0;
+}
+body.panel-mode .view-back-button,
+body.panel-mode .collapse-button {
+  display: none;
+}
 .couple-badge { position:absolute; top:48px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid #dcebe3; border-radius:999px; background:#ffffffd9; color:#4f7565; box-shadow:0 3px 10px #2b4a3614; font-size:10px; z-index:3; white-space:nowrap; }
 .couple-badge span:first-child { color:#c46355; font-weight:800; }
 .couple-badge span + span { color:#8b9f95; }

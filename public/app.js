@@ -481,7 +481,7 @@ function onEvent(event) {
   $('events').querySelector('.empty-state')?.remove();
   renderEvent(event);
   const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
-  if (event.kind === 'walk' && desktop) desktop.startWalk();
+  if (event.kind === 'walk' && desktop && !panelMode) desktop.startWalk();
   else if (event.kind === 'walk') animateRemoteAction('happy');
   else if (event.kind === 'wave') animatePet('wiggle');
   else if (actionText[event.kind]) animateRemoteAction(event.kind);
@@ -556,6 +556,7 @@ async function connect(url, key, name, mode) {
   applyProfile(state.profile);
   setPeerOnline(session.presence || false);
   if (panelMode) {
+    state.expanded = true;
     $('window').classList.remove('compact');
     $('expanded').hidden = false;
     $('compactActions').hidden = true;
@@ -691,9 +692,17 @@ async function copy(value) {
 }
 
 async function init() {
+  if (panelMode && panelKind === 'settings' && !localStorage.getItem(SESSION_KEY)) {
+    $('setup').hidden = true;
+    $('appSettings').hidden = false;
+  }
   $('hostTab').addEventListener('click', () => setMode('host'));
   $('joinTab').addEventListener('click', () => setMode('join'));
   $('closeButton').addEventListener('click', () => {
+    if (panelMode) {
+      desktop?.closePanel();
+      return;
+    }
     if (!$('appSettings').hidden || (state.connected && state.expanded)) {
       returnFromSettings();
       return;
@@ -701,6 +710,10 @@ async function init() {
     desktop?.close();
   });
   $('settingsButton').addEventListener('click', () => {
+    if (desktop?.openPanel) {
+      desktop.openPanel('settings');
+      return;
+    }
     if (state.connected) { setExpanded(true); setView('connection'); return; }
     $('setup').hidden = true;
     $('appSettings').hidden = false;
@@ -769,7 +782,12 @@ async function init() {
     menu.style.top = `${Math.max(6, event.offsetY - 8)}px`;
     menu.hidden = false;
   });
-  $('contextSettings').addEventListener('click', () => { $('contextMenu').hidden = true; setExpanded(true); setView('connection'); });
+  $('contextHistory').addEventListener('click', () => { $('contextMenu').hidden = true; desktop?.openPanel?.('chat'); });
+  $('contextSettings').addEventListener('click', () => {
+    $('contextMenu').hidden = true;
+    if (desktop?.openPanel) desktop.openPanel('settings');
+    else { setExpanded(true); setView('connection'); }
+  });
   $('contextDisconnect').addEventListener('click', () => { $('contextMenu').hidden = true; disconnect(); });
   $('mascotButton').addEventListener('mouseenter', unpeek);
   $('mascotButton').addEventListener('focus', unpeek);
@@ -787,7 +805,10 @@ async function init() {
     $('window').classList.toggle('peeked', state.peeked);
   });
   if (desktop?.onMenuAction) desktop.onMenuAction(action => {
-    if (action === 'settings') { setExpanded(true); setView('connection'); }
+    if (action === 'settings') {
+      if (desktop?.openPanel) desktop.openPanel('settings');
+      else { setExpanded(true); setView('connection'); }
+    }
     if (action === 'show') setExpanded(state.connected ? state.expanded : true);
   });
   $('openButton').addEventListener('click', () => {
@@ -906,7 +927,7 @@ async function init() {
     $('joinKey').value = saved.key;
     setMode(saved.mode);
     try {
-      if (saved.mode === 'host' && desktop) {
+      if (saved.mode === 'host' && desktop && !panelMode) {
         const address = new URL(saved.url).hostname;
         const result = await desktop.startHost(address, senderId);
         state.hostStarted = true;
