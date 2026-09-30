@@ -68,12 +68,12 @@ test('actions require an online peer; delivery is transient and structured; file
     await new Promise((resolve, reject) => { hs.once('open', resolve); hs.once('error', reject); });
     const gs = new WebSocket(`${ctx.base.replace(/^http/, 'ws')}/ws?v=3&session=${guest.token}`);
     await new Promise((resolve, reject) => { gs.once('open', resolve); gs.once('error', reject); });
-    const delivery = await fetch(`${ctx.base}/api/events`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'delivery', clientId: 'd1', data: { transferId: 't1', name: '照片.png', progress: 35, status: 'uploading' } }) });
-    assert.equal(delivery.status, 201); const deliveryEvent = await delivery.json(); assert.deepEqual(deliveryEvent.data, { transferId: 't1', name: '照片.png', progress: 35, status: 'uploading' });
+    const delivery = await fetch(`${ctx.base}/api/events`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'delivery', clientId: 'd1', data: { transferId: 't1', name: '照片.png', progress: 35, status: 'uploading', type: 'file' } }) });
+    assert.equal(delivery.status, 201); const deliveryEvent = await delivery.json(); assert.deepEqual(deliveryEvent.data, { transferId: 't1', name: '照片.png', progress: 35, status: 'uploading', type: 'file' });
     assert.equal((await (await fetch(`${ctx.base}/api/events`, { headers: { 'X-Pet-Session': host.token } })).json()).some(item => item.kind === 'delivery'), false);
-    const form = new FormData(); form.append('file', new Blob(['hello']), 'ignored.txt'); form.append('fileName', '你好 世界.txt');
+    const form = new FormData(); form.append('file', new Blob(['hello']), 'ignored.txt'); form.append('fileName', '你好 世界.txt'); form.append('transferId', 't1');
     const uploaded = await fetch(`${ctx.base}/api/files`, { method: 'POST', headers: { 'X-Pet-Session': host.token }, body: form });
-    assert.equal(uploaded.status, 201); const file = await uploaded.json(); assert.equal(file.fileName, '你好 世界.txt');
+    assert.equal(uploaded.status, 201); const file = await uploaded.json(); assert.equal(file.fileName, '你好 世界.txt'); assert.equal(file.transferId, 't1');
     assert.equal((await fetch(`${ctx.base}/api/files/${file.fileId}`)).status, 401);
     assert.equal(await (await fetch(`${ctx.base}/api/files/${file.fileId}`, { headers: { 'X-Pet-Session': guest.token } })).text(), 'hello');
     hs.close(); gs.close();

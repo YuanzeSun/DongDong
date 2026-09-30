@@ -37,6 +37,19 @@ function downloadBuffer(data, maximumBytes) {
 }
 
 async function saveUniqueDownload(downloads, data, requestedName) {
+  const { handle, target } = await openUniqueDownload(downloads, requestedName);
+  try {
+    await handle.writeFile(data);
+    await handle.close();
+    return target;
+  } catch (error) {
+    await handle.close().catch(() => {});
+    await fs.unlink(target).catch(() => {});
+    throw error;
+  }
+}
+
+async function openUniqueDownload(downloads, requestedName) {
   await fs.mkdir(downloads, { recursive: true });
   const directory = await fs.realpath(downloads);
   const fileName = downloadName(requestedName);
@@ -51,17 +64,39 @@ async function saveUniqueDownload(downloads, data, requestedName) {
       if (error.code === 'EEXIST') continue;
       throw error;
     }
-    try {
-      await handle.writeFile(data);
-      await handle.close();
-      return target;
-    } catch (error) {
-      await handle.close().catch(() => {});
-      await fs.unlink(target).catch(() => {});
-      throw error;
-    }
+    return { handle, target };
   }
   throw new Error('同名文件太多，请先整理下载文件夹');
+}
+
+async function saveResponseDownload(downloads, response, requestedName, maximumBytes, onProgress = () => {}) {
+  if (!response.ok || !response.body) throw new Error('文件下载失败');
+  const length = Number(response.headers.get('content-length'));
+  const total = Number.isFinite(length) && length > 0 ? length : 0;
+  if (total > maximumBytes) throw new Error('文件超过允许的大小');
+  const { handle, target } = await openUniqueDownload(downloads, requestedName);
+  let received = 0;
+  try {
+    for await (const piece of response.body) {
+      const chunk = Buffer.from(piece);
+      if (received + chunk.length > maximumBytes) throw new Error('文件超过允许的大小');
+      let written = 0;
+      while (written < chunk.length) {
+        const result = await handle.write(chunk, written, chunk.length - written, received + written);
+        if (!result.bytesWritten) throw new Error('文件写入失败');
+        written += result.bytesWritten;
+      }
+      received += chunk.length;
+      onProgress(received, total);
+    }
+    if (total && received !== total) throw new Error('文件下载不完整');
+    await handle.close();
+    return target;
+  } catch (error) {
+    await handle.close().catch(() => {});
+    await fs.unlink(target).catch(() => {});
+    throw error;
+  }
 }
 
 function clampBounds(bounds, area) {
@@ -118,4 +153,4 @@ function tailnetPeers(status) {
     .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
 }
 
-module.exports = { downloadName, downloadBuffer, saveUniqueDownload, clampBounds, planWalkPath, tailnetPeers };
+module.exports = { downloadName, downloadBuffer, saveUniqueDownload, saveResponseDownload, clampBounds, planWalkPath, tailnetPeers };

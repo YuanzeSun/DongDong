@@ -6,7 +6,7 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { createRoom } = require('../server/room.cjs');
-const { downloadBuffer, saveUniqueDownload, clampBounds, planWalkPath, tailnetPeers } = require('./native-helpers.cjs');
+const { downloadBuffer, saveUniqueDownload, saveResponseDownload, clampBounds, planWalkPath, tailnetPeers } = require('./native-helpers.cjs');
 
 const PORT = 4827;
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
@@ -41,11 +41,40 @@ async function scanTailnetPeers() {
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 else {
-  let window; let tray; let room; let walkTimer; let jumpTimer; let walkMotionId; let jumpMotionId; let isQuitting = false; let isOnline = true; let peeked = false; let prePeekBounds = null;
+  let window; let tray; let room; let walkTimer; let jumpTimer; let walkMotionId; let jumpMotionId; let isQuitting = false; let isOnline = true; let peeked = false; let prePeekBounds = null; let ignoringMouse = false;
   // The mascot window is intentionally independent from these regular utility windows. Closing
   // a panel must never hide the mascot, and closing the mascot must not tear down a panel.
   const panelWindows = new Map();
   const savedDownloads = new Set(); const menuListeners = new Set();
+  const transfers = new Map();
+  const activeRemoteDownloads = new Map();
+  function reportTransfer(details) {
+    if (!details || typeof details.transferId !== 'string' || !details.transferId || details.transferId.length > 120) return;
+    const item = {
+      transferId: details.transferId,
+      fileId: String(details.fileId || '').slice(0, 120),
+      name: String(details.name || '').slice(0, 180),
+      roomUrl: String(details.roomUrl || '').slice(0, 180),
+      direction: details.direction === 'receive' ? 'receive' : 'send',
+      phase: String(details.phase || '').slice(0, 32),
+      progress: Math.max(0, Math.min(100, Number(details.progress) || 0)),
+      savedPath: String(details.savedPath || '').slice(0, 1024),
+      updatedAt: Date.now()
+    };
+    transfers.set(item.transferId, item);
+    while (transfers.size > 300) transfers.delete(transfers.keys().next().value);
+    for (const panel of panelWindows.values()) if (!panel.isDestroyed()) panel.webContents.send('transfer-progress', item);
+  }
+  function remoteFileUrl(origin, fileId) {
+    const url = new URL(String(origin || ''));
+    const octets = url.hostname.split('.').map(Number);
+    const tailnet = octets.length === 4 && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127
+      && octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255);
+    if (url.protocol !== 'http:' || !tailnet && !['127.0.0.1', 'localhost'].includes(url.hostname)
+      || url.username || url.password || url.pathname !== '/' || url.search || url.hash
+      || !/^[0-9a-f-]{36}$/i.test(fileId)) throw new Error('文件地址无效');
+    return `${url.origin}/api/files/${fileId}`;
+  }
   const sendMenuAction = action => { for (const listener of menuListeners) listener(action); };
   function stopWalk() {
     if (walkTimer) clearInterval(walkTimer);
@@ -153,6 +182,7 @@ else {
   function configPath() { return path.join(app.getPath('userData'), 'room-config-v3.json'); }
   function getKey() { try { const key = JSON.parse(fs.readFileSync(configPath(), 'utf8')).key; if (typeof key === 'string' && key.length >= 20) return key; } catch { /* First launch. */ } const key = crypto.randomBytes(24).toString('base64url'); fs.mkdirSync(app.getPath('userData'), { recursive: true }); fs.writeFileSync(configPath(), JSON.stringify({ key }), { mode: 0o600 }); return key; }
   function autoLaunchPreferencePath() { return path.join(app.getPath('userData'), 'app-settings.json'); }
+  function downloadsPath() { return !app.isPackaged && process.env.DONGDONG_QA_DOWNLOADS_DIR || app.getPath('downloads'); }
   function saveAutoLaunchPreference(enabled) {
     fs.mkdirSync(app.getPath('userData'), { recursive: true });
     fs.writeFileSync(autoLaunchPreferencePath(), JSON.stringify({ autoLaunch: Boolean(enabled) }), { mode: 0o600 });
@@ -243,13 +273,56 @@ else {
     });
     ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', (_event, motionId) => startWalk(motionId)); ipcMain.handle('stop-walk', () => stopWalk()); ipcMain.handle('start-jump', (_event, motionId) => startJump(motionId)); ipcMain.handle('stop-jump', () => stopJump());
     ipcMain.handle('scan-peers', () => scanTailnetPeers());
-    ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) { stopWalk(); stopJump(); } return isOnline; }); ipcMain.handle('set-ignore-mouse-events', (_event, ignore, options = {}) => window?.setIgnoreMouseEvents(Boolean(ignore), { forward: options.forward !== false }));
+    ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) { stopWalk(); stopJump(); } return isOnline; });
+    ipcMain.handle('set-ignore-mouse-events', (event, ignore) => {
+      if (!window || window.isDestroyed() || event.sender !== window.webContents) return false;
+      const next = Boolean(ignore);
+      if (next !== ignoringMouse) {
+        window.setIgnoreMouseEvents(next, { forward: true });
+        ignoringMouse = next;
+      }
+      return ignoringMouse;
+    });
     ipcMain.handle('set-peeked', (_event, next) => setPeeked(next));
     ipcMain.handle('open-panel', (_event, kind) => openPanel(kind));
     ipcMain.handle('close-panel', event => closePanel(event.sender));
-    ipcMain.handle('copy', (_event, value) => clipboard.writeText(String(value).slice(0, 500))); ipcMain.handle('get-downloads-path', () => app.getPath('downloads'));
-    ipcMain.handle('save-download', async (_event, data, requestedName) => { const savedPath = await saveUniqueDownload(app.getPath('downloads'), downloadBuffer(data, MAX_DOWNLOAD_BYTES), requestedName); savedDownloads.add(path.resolve(savedPath)); return savedPath; });
-    ipcMain.handle('reveal-download', async (_event, requestedPath) => { const resolved = path.resolve(String(requestedPath || '')); if (!savedDownloads.has(resolved)) throw new Error('只能打开本次保存的文件'); await shell.showItemInFolder(resolved); return true; }); ipcMain.handle('open-downloads', () => shell.openPath(app.getPath('downloads')));
+    ipcMain.handle('copy', (_event, value) => clipboard.writeText(String(value).slice(0, 500))); ipcMain.handle('get-downloads-path', downloadsPath);
+    ipcMain.handle('save-download', async (_event, data, requestedName) => { const savedPath = await saveUniqueDownload(downloadsPath(), downloadBuffer(data, MAX_DOWNLOAD_BYTES), requestedName); savedDownloads.add(path.resolve(savedPath)); return savedPath; });
+    ipcMain.on('report-transfer', (_event, details) => reportTransfer(details));
+    ipcMain.handle('transfer-snapshot', () => [...transfers.values()]);
+    ipcMain.handle('save-remote-file', (_event, details = {}) => {
+      const fileId = String(details.fileId || '');
+      const url = remoteFileUrl(details.url, fileId);
+      const token = String(details.token || '');
+      if (!token || token.length > 200) throw new Error('文件会话无效');
+      if (activeRemoteDownloads.has(fileId)) return activeRemoteDownloads.get(fileId);
+      const transferId = String(details.transferId || fileId);
+      const name = String(details.fileName || 'file');
+      const report = (phase, progress, savedPath = '') => reportTransfer({ transferId, fileId, name, roomUrl: details.url, direction: 'receive', phase, progress, savedPath });
+      const download = (async () => {
+        report('downloading', 0);
+        try {
+          const response = await fetch(url, { headers: { 'X-Pet-Session': token }, signal: AbortSignal.timeout(120000) });
+          if (!response.ok) throw new Error(`文件下载失败 (${response.status})`);
+          let lastReport = 0;
+          const savedPath = await saveResponseDownload(downloadsPath(), response, name, MAX_DOWNLOAD_BYTES, (received, total) => {
+            const now = Date.now();
+            if (now - lastReport < 120 && received !== total) return;
+            lastReport = now;
+            report('downloading', total ? received / total * 100 : 0);
+          });
+          savedDownloads.add(path.resolve(savedPath));
+          report('saved', 100, savedPath);
+          return savedPath;
+        } catch (error) {
+          report('failed', 0);
+          throw error;
+        } finally { activeRemoteDownloads.delete(fileId); }
+      })();
+      activeRemoteDownloads.set(fileId, download);
+      return download;
+    });
+    ipcMain.handle('reveal-download', async (_event, requestedPath) => { const resolved = path.resolve(String(requestedPath || '')); if (!savedDownloads.has(resolved)) throw new Error('只能打开本次保存的文件'); await shell.showItemInFolder(resolved); return true; }); ipcMain.handle('open-downloads', () => shell.openPath(downloadsPath()));
     ipcMain.handle('get-auto-launch', () => app.getLoginItemSettings().openAtLogin); ipcMain.handle('set-auto-launch', (_event, enabled) => { app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true }); saveAutoLaunchPreference(enabled); return app.getLoginItemSettings().openAtLogin; });
     ipcMain.handle('notify', (_event, title, body) => { if (Notification.isSupported()) new Notification({ title: String(title), body: String(body).slice(0, 140) }).show(); }); ipcMain.handle('close-window', () => window?.hide()); ipcMain.handle('quit-app', quitApp);
     ipcMain.handle('on-menu-action', event => { const listener = action => event.sender.send('menu-action', action); menuListeners.add(listener); event.sender.once('destroyed', () => menuListeners.delete(listener)); return true; });

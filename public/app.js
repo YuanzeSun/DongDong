@@ -5,6 +5,7 @@ const panelMode = panelKind === 'chat' || panelKind === 'settings';
 const catAnimator = !panelMode && window.PixelCatAnimator ? new window.PixelCatAnimator($('mainMascot')) : null;
 const DEFAULT_PET_NAME = '小橘';
 const SESSION_KEY = 'dongdong-session-v3';
+const SAVED_FILES_KEY = 'dongdong-saved-files-v3';
 const senderId = localStorage.getItem('dongdong-sender-id-v3') || crypto.randomUUID();
 localStorage.setItem('dongdong-sender-id-v3', senderId);
 
@@ -36,6 +37,14 @@ let edgeHoldTimer;
 let deliveryFinishTimer;
 let connectionEpoch = 0;
 const pendingDeliveries = new Map();
+const activeDownloads = new Set();
+const savedFileIds = new Set(JSON.parse(localStorage.getItem(SAVED_FILES_KEY) || '[]'));
+const transferStates = new Map();
+const transferRows = new Map();
+let ignoringMouse = false;
+let lastPointer = null;
+let catHoverUntil = 0;
+const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: false, suppressClick: false };
 
 if (panelMode) document.body.classList.add('panel-mode');
 
@@ -534,6 +543,45 @@ async function scanPeers() {
   }
 }
 
+function insideRect(point, element) {
+  if (!point || !element) return false;
+  const rect = element.getBoundingClientRect();
+  return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+}
+
+function overVisibleCat(point) {
+  const mascot = $('mainMascot');
+  if (!insideRect(point, mascot)) return false;
+  const rect = mascot.getBoundingClientRect();
+  const x = (point.x - rect.left) / rect.width * 64;
+  const y = (point.y - rect.top) / rect.height * 64;
+  const head = y >= 3 && y < 40 && x >= (y < 18 ? 17 : 10) && x <= (y < 18 ? 49 : 54);
+  const body = y >= 36 && y <= 62 && x >= 8 && x <= 56;
+  const tail = y >= 30 && y <= 62 && x >= 45 && x <= 64;
+  return head || body || tail;
+}
+
+function syncMousePassThrough() {
+  if (!desktop?.setIgnoreMouseEvents || panelMode) return;
+  const compact = state.connected && $('window').classList.contains('compact');
+  const cat = compact && overVisibleCat(lastPointer);
+  $('window').classList.toggle('cat-hovered', Boolean(cat));
+  let interactive = !compact || mascotDrag.pointerId !== null;
+  if (compact && !interactive) {
+    interactive = !$('actionTray').hidden || !$('quickMessageForm').hidden || !$('contextMenu').hidden || !$('dropOverlay').hidden;
+    if (!interactive && lastPointer) {
+      if (cat) catHoverUntil = Date.now() + 180;
+      const actions = insideRect(lastPointer, $('compactActions'))
+        && (Date.now() < catHoverUntil || getComputedStyle($('compactActions')).visibility === 'visible');
+      interactive = cat || actions;
+    }
+  }
+  const nextIgnored = !interactive;
+  if (nextIgnored === ignoringMouse) return;
+  ignoringMouse = nextIgnored;
+  desktop.setIgnoreMouseEvents(nextIgnored, { forward: true }).catch(() => { ignoringMouse = !nextIgnored; });
+}
+
 function setQuickComposer(open) {
   const form = $('quickMessageForm');
   if (!form) return;
@@ -545,11 +593,13 @@ function setQuickComposer(open) {
   } else {
     $('quickMessageInput').value = '';
   }
+  syncMousePassThrough();
 }
 
 function setActionTray(open) {
   $('actionTray').hidden = !open;
   $('actionMenuButton').setAttribute('aria-expanded', String(open));
+  syncMousePassThrough();
 }
 
 function setExpanded(expanded) {
@@ -561,6 +611,7 @@ function setExpanded(expanded) {
   $('expanded').hidden = !expanded;
   $('compactActions').hidden = expanded;
   const resized = panelMode ? undefined : desktop?.setWindowSize(expanded);
+  syncMousePassThrough();
   if (!expanded && !panelMode) schedulePeek();
   if (expanded && !panelMode) setTimeout(() => $('messageInput').focus(), 100);
   return resized;
@@ -668,6 +719,7 @@ async function request(route, options = {}) {
   const headers = state.token ? { 'X-Pet-Session': state.token } : { 'X-Pet-Key': state.key };
   const response = await fetch(`${state.url}/api${route}`, {
     ...options,
+    signal: options.signal || AbortSignal.timeout(15000),
     headers: { ...headers, ...options.headers }
   });
   if (!response.ok) {
@@ -713,14 +765,76 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-async function downloadFile(event) {
+function transferLabel(item) {
+  if (item.phase === 'saved') return '已保存到下载';
+  if (item.phase === 'failed') return item.direction === 'receive' ? '接收失败，点击文件重试' : '发送失败';
+  if (item.phase === 'uploaded') return '已发送到房间';
+  if (item.phase === 'waiting') return '等待接收';
+  if (item.phase === 'downloading') return `正在保存到下载 · ${Math.round(item.progress)}%`;
+  return item.direction === 'receive' ? `正在接收 · ${Math.round(item.progress)}%` : `正在发送 · ${Math.round(item.progress)}%`;
+}
+
+function showTransfer(item) {
+  if (panelKind !== 'chat' || !item?.transferId) return;
+  item = { ...item, roomUrl: item.roomUrl || state.url };
+  const previous = transferStates.get(item.transferId);
+  if (previous?.phase === 'saved' && item.phase !== 'saved') return;
+  if (previous?.phase === 'uploaded' && item.phase === 'uploading') return;
+  if (previous?.phase === 'downloading' && item.phase === 'uploading') return;
+  transferStates.set(item.transferId, item);
+  while (transferStates.size > 300) transferStates.delete(transferStates.keys().next().value);
+  if (!state.url || item.roomUrl !== state.url) return;
+  let row = transferRows.get(item.transferId);
+  if (!row) {
+    row = document.createElement('div');
+    row.className = `event transfer-event ${item.direction === 'send' ? 'mine' : ''}`;
+    const heading = document.createElement('div');
+    heading.className = 'event-body';
+    heading.textContent = item.name || '文件';
+    row.appendChild(heading);
+    $('events').appendChild(row);
+    transferRows.set(item.transferId, row);
+  }
+  let status = row.querySelector('.transfer-status');
+  if (!status) {
+    status = document.createElement('div');
+    status.className = 'transfer-status';
+    const label = document.createElement('span');
+    const bar = document.createElement('progress');
+    bar.max = 100;
+    status.append(label, bar);
+    row.appendChild(status);
+  }
+  status.querySelector('span').textContent = transferLabel(item);
+  const bar = status.querySelector('progress');
+  bar.value = item.progress;
+  bar.hidden = ['saved', 'failed', 'uploaded', 'waiting'].includes(item.phase);
+  $('events').scrollTop = $('events').scrollHeight;
+}
+
+function rememberSavedFile(fileId) {
+  savedFileIds.add(fileId);
+  const recent = [...savedFileIds].slice(-300);
+  savedFileIds.clear();
+  for (const id of recent) savedFileIds.add(id);
+  localStorage.setItem(SAVED_FILES_KEY, JSON.stringify(recent));
+}
+
+async function downloadFile(event, automatic = false) {
+  if (automatic && savedFileIds.has(event.fileId)) return true;
+  if (activeDownloads.has(event.fileId)) return false;
+  activeDownloads.add(event.fileId);
   try {
-    const response = await request(`/files/${encodeURIComponent(event.fileId)}`);
-    const data = await response.arrayBuffer();
-    if (desktop) {
-      const savedPath = await desktop.saveDownload(data, event.fileName);
-      toast(`已保存到下载：${savedPath.split(/[\\/]/).pop()}`);
+    if (desktop?.saveRemoteFile) {
+      const savedPath = await desktop.saveRemoteFile({
+        url: state.url, token: state.token, fileId: event.fileId,
+        fileName: event.fileName, transferId: event.transferId || event.id
+      });
+      rememberSavedFile(event.fileId);
+      if (!automatic) toast(`已保存到下载：${savedPath.split(/[\\/]/).pop()}`);
     } else {
+      const response = await request(`/files/${encodeURIComponent(event.fileId)}`);
+      const data = await response.arrayBuffer();
       const blobUrl = URL.createObjectURL(new Blob([data]));
       const link = document.createElement('a');
       link.href = blobUrl;
@@ -730,7 +844,18 @@ async function downloadFile(event) {
       link.remove();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     }
-  } catch (error) { toast(error.message); }
+    return true;
+  } catch (error) {
+    if (automatic) {
+      if (state.notifications) desktop?.notify('文件接收失败', `${event.fileName}，可在消息记录里重试`);
+    } else toast(error.message);
+    return false;
+  } finally { activeDownloads.delete(event.fileId); }
+}
+
+function receiveFile(event) {
+  if (panelMode || event.senderId === senderId || !desktop?.saveRemoteFile) return;
+  downloadFile(event, true);
 }
 
 function renderEvent(event) {
@@ -741,6 +866,12 @@ function renderEvent(event) {
   meta.textContent = `${event.senderId === senderId ? '我' : event.senderName} · ${formatTime(event.createdAt)}`;
   wrapper.appendChild(meta);
   if (event.kind === 'file') {
+    const transferId = event.transferId || event.id;
+    if (panelKind === 'chat') {
+      const earlier = transferRows.get(transferId);
+      if (earlier) earlier.remove();
+      transferRows.set(transferId, wrapper);
+    }
     const button = document.createElement('button');
     button.className = 'event-body file-event';
     button.title = `下载 ${event.fileName}`;
@@ -752,8 +883,19 @@ function renderEvent(event) {
     const size = document.createElement('small');
     size.textContent = formatSize(event.size);
     button.append(icon, name, size);
-    button.addEventListener('click', () => downloadFile(event));
+    button.addEventListener('click', () => {
+      if (event.senderId !== senderId && savedFileIds.has(event.fileId)) desktop?.openDownloads();
+      else downloadFile(event);
+    });
     wrapper.appendChild(button);
+    if (panelKind === 'chat') {
+      const progress = transferStates.get(transferId) || {
+        transferId, name: event.fileName, direction: event.senderId === senderId ? 'send' : 'receive',
+        phase: event.senderId === senderId ? 'uploaded' : savedFileIds.has(event.fileId) ? 'saved' : 'waiting',
+        progress: event.senderId === senderId || savedFileIds.has(event.fileId) ? 100 : 0
+      };
+      showTransfer(progress);
+    }
   } else {
     const body = document.createElement('div');
     body.className = 'event-body';
@@ -770,14 +912,21 @@ function onEvent(event) {
   seenEvents.add(event.id);
   if (event.senderId !== senderId && !panelMode) unpeek(true);
   if (event.kind === 'delivery') {
+    const data = event.data || {};
+    if (panelKind === 'chat' && data.type === 'file') showTransfer({
+      transferId: data.transferId, name: data.name,
+      direction: event.senderId === senderId ? 'send' : 'receive',
+      phase: 'uploading', progress: Number(data.progress) || 0
+    });
     if (panelMode) return;
     if (event.senderId !== senderId) {
-      const data = event.data || {};
-      const name = data.name || String(event.text || '').split('|')[0] || '一封信';
-      const progress = Number(data.progress ?? String(event.text || '').split('|')[1] ?? 0) / 100;
-      pendingDeliveries.set(event.senderId, Date.now());
-      animateDelivery(progress);
-      speak(`${event.senderName} 正在递来 ${name} · ${Math.round(progress * 100)}%`);
+      if (!pendingDeliveries.has(data.transferId)) {
+        pendingDeliveries.set(data.transferId, Date.now());
+        setTimeout(() => pendingDeliveries.delete(data.transferId), 30000);
+        animateDelivery(0);
+        speak(`${event.senderName} 正在递信`);
+      }
+      $('mainMascot').style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, Number(data.progress) / 100 || 0))));
     }
     return;
   }
@@ -786,6 +935,7 @@ function onEvent(event) {
   // The mascot window owns animations and notifications. A history panel only
   // mirrors the live event stream, otherwise opening it would duplicate effects.
   if (panelMode) return;
+  if (event.kind === 'file') receiveFile(event);
   const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
   if (event.kind === 'walk') startMotion('walk');
   else if (event.kind === 'jump') startMotion('jump');
@@ -795,8 +945,9 @@ function onEvent(event) {
     const message = event.kind === 'file' ? `收到文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 来打招呼啦` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : event.text;
     speak(message, actionText[event.kind] ? 'alert' : 'normal');
     if (event.kind === 'file' || event.kind === 'message') {
-      const started = pendingDeliveries.get(event.senderId);
-      pendingDeliveries.delete(event.senderId);
+      const transferId = event.transferId;
+      const started = transferId ? pendingDeliveries.get(transferId) : null;
+      if (transferId) pendingDeliveries.delete(transferId);
       setTimeout(animateReceive, started ? Math.max(0, 650 - (Date.now() - started)) : 0);
     }
     if (desktop && state.notifications) desktop.notify(state.profile.petName || DEFAULT_PET_NAME, event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
@@ -813,7 +964,10 @@ function openSocket() {
     updateConnectionStatus();
     try {
       const response = await request('/events');
-      for (const event of await response.json()) onEvent(event);
+      for (const event of await response.json()) {
+        onEvent(event);
+        if (event.kind === 'file') receiveFile(event);
+      }
     } catch { /* The socket's close handler will retry if the room went away. */ }
   };
   socket.onmessage = message => {
@@ -881,6 +1035,7 @@ async function connect(url, key, name, mode) {
   $('roomKey').textContent = state.key;
   $('hostKeyBlock').hidden = mode !== 'host';
   $('events').replaceChildren();
+  transferRows.clear();
   seenEvents.clear();
   const visibleEvents = events.filter(event => event.kind !== 'delivery');
   if (visibleEvents.length === 0) {
@@ -892,8 +1047,10 @@ async function connect(url, key, name, mode) {
     events.forEach(event => { seenEvents.add(event.id); if (event.kind !== 'delivery') renderEvent(event); });
     $('speech').textContent = '';
   }
+  if (panelKind === 'chat') for (const transfer of transferStates.values()) showTransfer(transfer);
   applyProfile(state.profile);
   setPeerOnline(session?.presence || false);
+  if (!panelMode) for (const event of visibleEvents) if (event.kind === 'file') receiveFile(event);
   if (panelMode) {
     state.expanded = true;
     $('window').classList.remove('compact');
@@ -921,9 +1078,10 @@ async function connect(url, key, name, mode) {
 }
 
 async function disconnect() {
+  if (!state.connected) return;
   ++connectionEpoch;
-  try { if (state.token) await request('/leave', { method: 'POST' }); } catch { /* Room may already be gone. */ }
   state.connected = false;
+  try { if (state.token) await request('/leave', { method: 'POST' }); } catch { /* Room may already be gone. */ }
   state.roomConnection = 'closed';
   if (state.walking) await desktop?.stopWalk();
   if (state.jumping) await desktop?.stopJump();
@@ -960,11 +1118,11 @@ async function disconnect() {
   if (panelMode) desktop?.closePanel();
 }
 
-async function sendEvent(kind, text = '', data = {}) {
+async function sendEvent(kind, text = '', data = {}, { quiet = false, signal, clientId = crypto.randomUUID() } = {}) {
   try {
     const response = await request('/events', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind, text, data, clientId: crypto.randomUUID() })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+      body: JSON.stringify({ kind, text, data, clientId })
     });
     if (kind === 'wave') {
       speak('招手送出去了');
@@ -972,36 +1130,57 @@ async function sendEvent(kind, text = '', data = {}) {
     else if (kind === 'jump') speak('已经让对方乱蹦啦', 'alert');
     else if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(kind)) speak('动作送到对方那里啦', 'alert');
     return await response.json();
-  } catch (error) { toast(error.message); return null; }
+  } catch (error) { if (!quiet) toast(error.message); return null; }
 }
 
-async function sendMessage(text) {
-  const transferId = crypto.randomUUID();
+async function sendMessage(text, clientId) {
   animateDelivery(0);
-  if (!await sendEvent('delivery', '', { transferId, name: text.slice(0, 180), progress: 0, status: 'preparing' })) return;
-  speak('叼着信出发啦');
-  await new Promise(resolve => setTimeout(resolve, 380));
-  await sendEvent('delivery', '', { transferId, name: text.slice(0, 180), progress: 55, status: 'walking' });
-  await new Promise(resolve => setTimeout(resolve, 480));
-  await sendEvent('delivery', '', { transferId, name: text.slice(0, 180), progress: 100, status: 'at-window' });
-  await new Promise(resolve => setTimeout(resolve, 280));
-  await sendEvent('message', text);
-  speak('信送到窗口啦', 'alert');
+  const sent = await sendEvent('message', text, {}, { clientId });
+  if (!sent) return false;
+  $('mainMascot').style.setProperty('--delivery-progress', '1');
+  speak('信已寄出', 'alert');
+  return true;
+}
+
+async function submitMessage(form, input) {
+  if (form.dataset.sending === 'true') return;
+  const text = input.value.trim();
+  if (!text) return;
+  if (!state.connected) return toast('还没有连接房间');
+  form.dataset.sending = 'true';
+  const clientId = form.dataset.pendingId || crypto.randomUUID();
+  form.dataset.pendingId = clientId;
+  const sendButton = form.querySelector('.send-button');
+  sendButton.disabled = true;
+  input.disabled = true;
+  try {
+    if (await sendMessage(text, clientId)) {
+      input.value = '';
+      delete form.dataset.pendingId;
+    }
+  } finally {
+    form.dataset.sending = 'false';
+    sendButton.disabled = false;
+    input.disabled = false;
+    if (!form.hidden) input.focus();
+  }
 }
 
 async function sendFile(file) {
   if (!file) return;
   if (file.size > 100 * 1024 * 1024) return toast('文件不能超过 100 MB');
+  const transferId = crypto.randomUUID();
   const form = new FormData();
   form.append('file', file);
   form.append('senderId', senderId);
   form.append('senderName', state.name);
   form.append('fileName', file.name);
   form.append('clientId', crypto.randomUUID());
+  form.append('transferId', transferId);
   speak(`叼着 ${file.name} 送过去…`);
-  const transferId = crypto.randomUUID();
+  desktop?.reportTransfer?.({ transferId, name: file.name, roomUrl: state.url, direction: 'send', phase: 'uploading', progress: 0 });
   animateDelivery(0);
-  await sendEvent('delivery', '', { transferId, name: file.name, progress: 0, status: 'preparing' });
+  await sendEvent('delivery', '', { transferId, name: file.name, progress: 0, status: 'preparing', type: 'file' }, { quiet: true, signal: AbortSignal.timeout(1500) });
   try {
     const event = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -1013,8 +1192,9 @@ async function sendFile(file) {
         const ratio = progress.loaded / progress.total;
         if (ratio < 1 && ratio - lastProgress < 0.1) return;
         lastProgress = ratio;
-        sendEvent('delivery', '', { transferId, name: file.name, progress: Math.round(ratio * 100), status: ratio >= 1 ? 'complete' : 'uploading' });
-        speak(`叼着文件走到窗口 ${Math.round(ratio * 100)}%`);
+        const progressValue = Math.round(ratio * 100);
+        desktop?.reportTransfer?.({ transferId, name: file.name, roomUrl: state.url, direction: 'send', phase: 'uploading', progress: progressValue });
+        sendEvent('delivery', '', { transferId, name: file.name, progress: progressValue, status: 'uploading', type: 'file' }, { quiet: true });
       };
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText));
@@ -1024,8 +1204,12 @@ async function sendFile(file) {
       xhr.send(form);
     });
     speak(`${event.fileName} 已送到窗口`);
-    await sendEvent('delivery', '', { transferId, name: event.fileName, progress: 100, status: 'complete' });
-  } catch (error) { toast(error.message); speak('发送失败', 'alert'); }
+    desktop?.reportTransfer?.({ transferId, fileId: event.fileId, name: event.fileName, roomUrl: state.url, direction: 'send', phase: 'uploaded', progress: 100 });
+  } catch (error) {
+    desktop?.reportTransfer?.({ transferId, name: file.name, roomUrl: state.url, direction: 'send', phase: 'failed', progress: 0 });
+    toast(error.message);
+    speak('发送失败', 'alert');
+  }
   $('fileInput').value = '';
 }
 
@@ -1036,6 +1220,15 @@ async function copy(value) {
 }
 
 async function init() {
+  if (desktop?.onTransferProgress) {
+    desktop.onTransferProgress(showTransfer);
+    desktop.transferSnapshot().then(items => items.forEach(showTransfer)).catch(() => {});
+  }
+  document.addEventListener('mousemove', event => {
+    lastPointer = { x: event.clientX, y: event.clientY };
+    syncMousePassThrough();
+  });
+  document.addEventListener('mouseleave', () => { lastPointer = null; syncMousePassThrough(); });
   if (panelMode && panelKind === 'settings' && !localStorage.getItem(SESSION_KEY)) {
     $('setup').hidden = true;
     $('appSettings').hidden = false;
@@ -1080,6 +1273,21 @@ async function init() {
   });
   window.addEventListener('storage', event => {
     if (event.key === 'dongdong-edge-hide') setEdgeHide(event.newValue === 'true');
+    if (event.key === 'dongdong-idle-actions') {
+      state.idleActions = event.newValue === 'true';
+      $('idleActionsToggle').checked = state.idleActions;
+      if (state.idleActions) scheduleIdleAction(); else clearTimeout(state.idleTimer);
+    }
+    if (event.key === 'dongdong-notifications') {
+      state.notifications = event.newValue === 'true';
+      $('desktopNotificationsToggle').checked = state.notifications;
+    }
+    if (event.key === 'dongdong-auto-launch') setAutoLaunchToggles(event.newValue === 'true');
+    if (event.key === SAVED_FILES_KEY) {
+      savedFileIds.clear();
+      for (const fileId of JSON.parse(event.newValue || '[]')) savedFileIds.add(fileId);
+    }
+    if (event.key === SESSION_KEY && !event.newValue && state.connected) disconnect();
   });
   $('desktopNotificationsToggle').addEventListener('change', event => {
     state.notifications = event.target.checked;
@@ -1095,7 +1303,6 @@ async function init() {
     if (mascotDrag.suppressClick) { mascotDrag.suppressClick = false; return; }
     triggerAction('pet');
   });
-  const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: false, suppressClick: false };
   const finishMascotDrag = event => {
     const pointerId = mascotDrag.pointerId;
     if (pointerId === null || (event?.pointerId != null && pointerId !== event.pointerId)) return;
@@ -1105,6 +1312,7 @@ async function init() {
     mascotDrag.suppressClick = event?.type === 'pointerup' || event?.type === 'pointermove'
       ? mascotDrag.moved : false;
     try { $('mascotButton').releasePointerCapture?.(pointerId); } catch { /* Capture may already be gone. */ }
+    syncMousePassThrough();
   };
   $('mascotButton').addEventListener('pointerdown', event => {
     if (event.button !== 0 || !desktop?.moveWindow || mascotDrag.pointerId !== null) return;
@@ -1116,6 +1324,7 @@ async function init() {
     mascotDrag.moved = false;
     mascotDrag.suppressClick = false;
     $('mascotButton').setPointerCapture?.(event.pointerId);
+    syncMousePassThrough();
   });
   $('mascotButton').addEventListener('pointermove', event => {
     if (mascotDrag.pointerId !== event.pointerId) return;
@@ -1149,23 +1358,26 @@ async function init() {
     menu.style.left = `${Math.max(6, Math.min(event.offsetX, main.clientWidth - 132))}px`;
     menu.style.top = `${Math.max(6, event.offsetY - 8)}px`;
     menu.hidden = false;
+    syncMousePassThrough();
   });
-  $('contextHistory').addEventListener('click', () => { $('contextMenu').hidden = true; desktop?.openPanel?.('chat'); });
+  $('contextHistory').addEventListener('click', () => { $('contextMenu').hidden = true; syncMousePassThrough(); desktop?.openPanel?.('chat'); });
   $('contextSettings').addEventListener('click', () => {
     $('contextMenu').hidden = true;
+    syncMousePassThrough();
     if (desktop?.openPanel) desktop.openPanel('settings');
     else { setExpanded(true); setView('connection'); }
   });
   $('mascotButton').addEventListener('mouseenter', unpeek);
   $('mascotButton').addEventListener('focus', unpeek);
   document.addEventListener('click', event => {
-    if (!event.target.closest('#contextMenu')) $('contextMenu').hidden = true;
+    if (!event.target.closest('#contextMenu')) { $('contextMenu').hidden = true; syncMousePassThrough(); }
     if (!event.target.closest('#actionTray, #actionMenuButton')) setActionTray(false);
   });
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     if (!$('actionTray').hidden) { setActionTray(false); $('actionMenuButton').focus(); }
     $('contextMenu').hidden = true;
+    syncMousePassThrough();
   });
   $('waveButton').addEventListener('click', () => triggerAction('wave'));
   $('careButton').addEventListener('click', () => triggerAction('care'));
@@ -1202,16 +1414,13 @@ async function init() {
   $('quickMessageClose').addEventListener('click', () => setQuickComposer(false));
   $('quickMessageForm').addEventListener('submit', event => {
     event.preventDefault();
-    const input = $('quickMessageInput');
-    const text = input.value.trim();
-    if (!text) return;
-    if (!state.connected) return toast('还没有连接房间');
-    input.value = '';
-    sendMessage(text).finally(() => input.focus());
+    submitMessage(event.currentTarget, $('quickMessageInput'));
   });
   $('quickMessageInput').addEventListener('keydown', event => {
     if (event.key === 'Escape') setQuickComposer(false);
   });
+  $('quickMessageInput').addEventListener('input', () => { delete $('quickMessageForm').dataset.pendingId; });
+  $('messageInput').addEventListener('input', () => { delete $('messageForm').dataset.pendingId; });
   $('collapseButton').addEventListener('click', returnFromSettings);
   $('chatTab').addEventListener('click', () => setView('chat'));
   $('connectionTab').addEventListener('click', () => setView('connection'));
@@ -1231,11 +1440,7 @@ async function init() {
   $('fileInput').addEventListener('change', event => sendFile(event.target.files[0]));
   $('messageForm').addEventListener('submit', event => {
     event.preventDefault();
-    const input = $('messageInput');
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = '';
-    sendMessage(text);
+    submitMessage(event.currentTarget, $('messageInput'));
   });
 
   let dragDepth = 0;
@@ -1286,6 +1491,7 @@ async function init() {
       try {
         const value = await desktop.setAutoLaunch(event.target.checked);
         setAutoLaunchToggles(value);
+        localStorage.setItem('dongdong-auto-launch', JSON.stringify(value));
         toast(event.target.checked ? '已开启开机自启动' : '已关闭开机自启动');
       } catch (error) {
         setAutoLaunchToggles(!event.target.checked);

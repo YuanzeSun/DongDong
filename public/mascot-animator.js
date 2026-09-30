@@ -20,6 +20,15 @@
       <g id="cat-paw-left"><path fill="#3b2b2b" d="M15 40h10v18H14V45h1z"/><path fill="#e49342" d="M17 42h7v13h-7z"/><path fill="#f2aa59" d="M16 53h9v4h-9z"/></g>
       <g id="cat-paw-right"><path fill="#3b2b2b" d="M39 40h11v18H38V45h1z"/><path fill="#e49342" d="M40 42h8v13h-8z"/><path fill="#f2aa59" d="M39 53h10v4H39z"/></g>
     </g>
+    <g id="cat-walk" display="none">
+      <g id="cat-walk-leg-far-back"><path fill="#3b2b2b" d="M18 43h9v17H16v-4h2z"/><path fill="#c97635" d="M19 46h6v11h-7v-2h1z"/></g>
+      <g id="cat-walk-leg-far-front"><path fill="#3b2b2b" d="M39 42h9v18H37v-4h2z"/><path fill="#c97635" d="M40 45h6v12h-7v-2h1z"/></g>
+      <g id="cat-walk-tail"><path fill="#3b2b2b" d="M17 39H9v-5H5V20h5v12h8v5h4v10h-5z"/><path fill="#df873a" d="M16 40H9v-5H7V23h2v10h9v7h2v5h-4z"/><path fill="#b95c32" d="M7 27h3v7H7z"/></g>
+      <g id="cat-walk-body"><path fill="#3b2b2b" d="M16 29h33v4h5v17h-4v4H16v-4h-4V36h4z"/><path fill="#e49342" d="M17 32h31v4h4v12h-4v3H17v-3h-2V37h2z"/><path fill="#f7c77b" d="M28 39h19v11H28z"/><path fill="#b95c32" d="M20 34h5v8h-5zM34 34h4v7h-4z"/><path fill="#4f9e88" d="M18 31h28v4H18z"/></g>
+      <g id="cat-walk-head"><path fill="#3b2b2b" d="M39 25V10h4V5h4l6 9h5V7h4v21h2v17H39V25z"/><path fill="#e49342" d="M42 24V13h3l6 9h9V13h2v29H42V24z"/><path fill="#f2a261" d="M44 13v8h5zM59 14v7h-4z"/><path fill="#b95c32" d="M49 22h3v8h-3zM55 22h3v8h-3z"/><path fill="#2d2530" d="M53 28h5v6h-5z"/><path fill="#fff1ca" d="M55 29h2v2h-2z"/><path fill="#f7c77b" d="M50 36h13v7H50z"/><path fill="#a9524b" d="M60 36h4v4h-4z"/><path fill="#3b2b2b" d="M60 42h3v2h-3zM58 39h5v1h-5z"/></g>
+      <g id="cat-walk-leg-near-back"><path fill="#3b2b2b" d="M20 43h9v17H18v-4h2z"/><path fill="#e49342" d="M21 46h6v11h-7v-2h1z"/><path fill="#f2aa59" d="M18 57h11v3H18z"/></g>
+      <g id="cat-walk-leg-near-front"><path fill="#3b2b2b" d="M42 42h10v18H40v-4h2z"/><path fill="#e49342" d="M43 45h7v12h-8v-2h1z"/><path fill="#f2aa59" d="M40 57h12v3H40z"/></g>
+    </g>
     <g id="cat-loaf" display="none">
       <g id="cat-loaf-tail"><path fill="#3b2b2b" d="M46 44h7v-5h6v3h4v14h-4v4H47v-4h-4z"/><path fill="#df873a" d="M49 45h6v-4h4v12h-3v4h-7z"/><path fill="#b95c32" d="M56 44h3v7h-3z"/></g>
       <g id="cat-loaf-body"><path fill="#3b2b2b" d="M15 36h32v3h5v5h4v12h-4v4H10v-4H7V46h4v-6h4z"/><path fill="#e49342" d="M17 39h29v3h5v5h2v8h-3v2H13v-2h-3v-8h4v-5h3z"/><path fill="#f7c77b" d="M19 47h28v9H19z"/><path fill="#b95c32" d="M44 41h4v8h-4z"/><path fill="#f2aa59" d="M14 55h12v3H14zM37 55h13v3H37z"/></g>
@@ -56,15 +65,15 @@
     loaf: { frames: 30, ms: 4200, loop: true, keys: [K(0, { eye: 'open', tail: 3 }), K(.25, { sy: 1, hy: .5, eye: 'closed' }), K(.45, { sy: 0, hy: 0, eye: 'open' }), K(.7, { sy: 1, hy: .5 }), K(1, { sy: 0, hy: 0 })] },
     'loaf-rise': { frames: 16, ms: 700, keys: [K(0, { eye: 'closed', tail: 3 }), K(.4, { hy: -2, sy: -1, eye: 'open' }), K(.6, { by: 5, hy: 5, ly: 3, ry: 3 }), K(.82, { by: 2, hy: 2 }), K(1)] },
     'nest-enter': { frames: 18, ms: 840, keys: [K(0), K(.35, { by: 3, hy: 3, ly: 2, ry: 2, eye: 'closed' }), K(.6, { by: 5, hy: 5, ly: 3, ry: 3 }), K(.82, { sy: 1 }), K(1, { sy: 0 })] },
-    nest: { frames: 30, ms: 4800, loop: true, keys: [K(0), K(.25, { sy: 1 }), K(.5, { sy: 0 }), K(.75, { sy: 1 }), K(1)] },
+    nest: { frames: 30, ms: 4800, loop: true, keys: [K(0, { prop: 'z', px: 48, py: 19 }), K(.25, { sy: 1, py: 14 }), K(.5, { sy: 0, py: 9 }), K(.75, { sy: 1, py: 5 }), K(1, { sy: 0, py: 19 })] },
     'nest-rise': { frames: 16, ms: 700, keys: [K(0, { eye: 'closed' }), K(.3, { sy: -2 }), K(.55, { sy: -3 }), K(.72, { by: 3, hy: 3, eye: 'open' }), K(1)] },
     sleep: { frames: 24, ms: 2400, loop: true, keys: [K(0, { sy: 0, prop: 'z', px: 49, py: 17 }), K(.25, { sy: 1, py: 13 }), K(.5, { sy: 0, py: 9 }), K(.75, { sy: 1, py: 13 }), K(1, { sy: 0, py: 17 })] },
     wake: { frames: 12, ms: 600, keys: [K(0, { sy: 0, prop: 'z', px: 49, py: 17 }), K(.25, { sy: -2, prop: '' }), K(.5, { sy: -4 }), K(.68, { sy: -3, eye: 'closed', hy: 5, by: 3 }), K(.82, { hy: 2, by: 1 }), K(1)] },
     blink: { frames: 8, ms: 520, keys: [K(0), K(.3, { eye: 'closed', hy: 1 }), K(.55, { eye: 'closed' }), K(.8), K(1)] },
     wave: { frames: 24, ms: 1800, keys: [K(0), K(.12, { lx: -2, ly: -5, hx: 1, tail: 1 }), K(.28, { lx: -3, ly: -15, hx: 2, tail: 2 }), K(.4, { lx: 0, ly: -12, hx: -1, eye: 'happy' }), K(.52, { lx: -4, ly: -17, hx: 2 }), K(.64, { lx: 0, ly: -12, hx: -1 }), K(.75, { lx: -4, ly: -16, hx: 2, eye: 'happy' }), K(.9, { lx: -1, ly: -4, hx: 0 }), K(1)] },
     happy: { frames: 24, ms: 1700, keys: [K(0), K(.14, { by: 3, hy: 3, eye: 'happy', mouth: 'open' }), K(.3, { by: -5, hy: -5, ly: -6, ry: -6, tail: 2, prop: 'spark', px: 52, py: 15 }), K(.48, { by: 2, hy: 2, prop: '' }), K(.63, { by: -4, hy: -4, ly: -4, ry: -4, tail: 1, prop: 'spark', px: 11, py: 18 }), K(.82, { by: 1, hy: 1, prop: '' }), K(1)] },
-    jump: { frames: 24, ms: 1720, keys: [K(0), K(.12, { by: 4, hy: 5, ly: 3, ry: 3, tail: 3 }), K(.25, { by: -5, hy: -7, lx: -5, ly: -12, rx: 5, ry: -12, rly: -5, rry: -5, tail: 2, eye: 'open', mouth: 'open' }), K(.42, { by: -9, hy: -10, lx: -7, ly: -15, rx: 7, ry: -15, tail: 1, prop: 'spark', px: 52, py: 49 }), K(.58, { by: -8, hy: -9, lx: -4, ly: -12, rx: 4, ry: -12, prop: '' }), K(.75, { by: -3, hy: -4, lx: -2, ly: -6, rx: 2, ry: -6, tail: 2 }), K(.86, { by: 4, hy: 4, ly: 3, ry: 3, tail: 3, prop: 'spark', px: 12, py: 54 }), K(1)] },
-    walk: { frames: 12, ms: 950, loop: true, keys: [K(0, { lx: -3, ly: -2, rx: 3, ry: 1, rlx: 2, rrx: -2, tail: 1 }), K(.25, { by: -2, hy: -2, lx: 0, rx: 0, rlx: 0, rrx: 0, tail: 2 }), K(.5, { lx: 3, ly: 1, rx: -3, ry: -2, rlx: -2, rrx: 2, tail: 3 }), K(.75, { by: -2, hy: -2, lx: 0, rx: 0, rlx: 0, rrx: 0, tail: 2 }), K(1, { lx: -3, ly: -2, rx: 3, ry: 1, rlx: 2, rrx: -2, tail: 1 })] },
+    jump: { frames: 32, ms: 1720, keys: [K(0), K(.07, { by: 5, hy: 5, ly: 3, ry: 3, tail: 3, eye: 'closed' }), K(.18, { by: -9, hy: -10, lx: -6, ly: -13, rx: 6, ry: -13, rly: -7, rry: -7, mouth: 'open', eye: 'open' }), K(.29, { by: -5, hy: -6, lx: -3, ly: -8, rx: 3, ry: -8 }), K(.37, { by: 5, hy: 5, ly: 3, ry: 3, tail: 3, prop: 'spark', px: 12, py: 55 }), K(.45, { by: 4, hy: 4, prop: '', eye: 'closed' }), K(.55, { by: -11, hy: -12, lx: -7, ly: -15, rx: 7, ry: -15, rly: -8, rry: -8, eye: 'open', mouth: 'open' }), K(.68, { by: -5, hy: -6, lx: -3, ly: -8, rx: 3, ry: -8 }), K(.77, { by: 5, hy: 5, ly: 3, ry: 3, prop: 'spark', px: 52, py: 55 }), K(.86, { by: 2, hy: 2, prop: '', eye: 'closed' }), K(1)] },
+    walk: { frames: 20, ms: 950, loop: true, keys: [K(0, { lx: -4, ly: -3, rx: 4, ry: 1, rlx: 4, rly: 1, rrx: -4, rry: -3, tx: -1, tail: 1 }), K(.25, { by: -2, lx: 0, rx: 0, rlx: 0, rrx: 0, tx: 1, ty: -2 }), K(.5, { lx: 4, ly: 1, rx: -4, ry: -3, rlx: -4, rly: -3, rrx: 4, rry: 1, tx: 2 }), K(.75, { by: -2, lx: 0, rx: 0, rlx: 0, rrx: 0, tx: 1, ty: -2 }), K(1, { lx: -4, ly: -3, rx: 4, ry: 1, rlx: 4, rly: 1, rrx: -4, rry: -3, tx: -1, tail: 1 })] },
     sit: { frames: 22, ms: 1750, keys: [K(0), K(.2, { by: 2, hy: 1, rly: 2, rry: 2, tail: 2 }), K(.42, { by: 5, hy: 2, rly: 4, rry: 4, ly: 2, ry: 2, tail: 3 }), K(.7, { by: 5, hy: 2, rly: 4, rry: 4, eye: 'closed' }), K(.86, { eye: 'open' }), K(1, { by: 4, hy: 2, rly: 3, rry: 3, ly: 1, ry: 1, tail: 3 })] },
     stretch: { frames: 26, ms: 1900, keys: [K(0), K(.18, { hy: 2, hx: -2, lx: -3, ly: 1, rx: 2, ry: 1, tail: 1 }), K(.36, { hx: -6, hy: 6, bx: 3, by: -3, lx: -10, ly: 5, rx: -5, ry: 5, tail: 2, eye: 'closed' }), K(.55, { hx: -8, hy: 7, bx: 5, by: -4, lx: -12, ly: 5, rx: -7, ry: 5, mouth: 'open', tail: 3 }), K(.75, { hx: -5, hy: 4, bx: 2, by: -2, lx: -8, ly: 3, rx: -4, ry: 3 }), K(.9, { hx: -2, hy: 1, bx: 1, by: 0, lx: -3, ly: 1, rx: -1, ry: 1 }), K(1)] },
     pet: { frames: 24, ms: 1850, keys: [K(0, { prop: 'hand', px: 32, py: -10 }), K(.18, { prop: 'hand', px: 32, py: 7, eye: 'closed' }), K(.35, { prop: 'hand', px: 29, py: 10, hx: -3, hy: 2, tail: 1, eye: 'happy' }), K(.52, { prop: 'hand', px: 36, py: 10, hx: 3, hy: 1, tail: 2 }), K(.68, { prop: 'hand', px: 30, py: 10, hx: -2, hy: 2, tail: 1 }), K(.82, { prop: 'heart', px: 50, py: 16, hx: 0, hy: 0, eye: 'happy' }), K(1, { prop: '', eye: 'open' })] },
@@ -73,8 +82,8 @@
     hug: { frames: 24, ms: 1850, keys: [K(0), K(.18, { lx: -8, ly: -5, rx: 8, ry: -5, eye: 'happy' }), K(.38, { lx: -6, ly: -10, rx: 6, ry: -10, hx: 0, hy: 2, prop: 'heart', px: 32, py: 49 }), K(.58, { lx: 4, ly: -7, rx: -4, ry: -7, by: 2, prop: 'heart', px: 32, py: 46 }), K(.76, { lx: 4, ly: -7, rx: -4, ry: -7, by: 1, prop: 'heart', px: 32, py: 42 }), K(.9, { lx: -2, ly: -4, rx: 2, ry: -4, prop: 'heart', px: 32, py: 31 }), K(1, { prop: '' })] },
     kiss: { frames: 22, ms: 1700, keys: [K(0), K(.2, { hx: 2, hy: 1, eye: 'closed', mouth: 'open', tail: 1 }), K(.38, { hx: 5, hy: -1, rx: 2, ry: -5, prop: 'heart', px: 45, py: 31 }), K(.55, { hx: 3, hy: 0, prop: 'heart', px: 53, py: 22 }), K(.76, { hx: 1, hy: 0, prop: 'heart', px: 60, py: 13, eye: 'happy' }), K(.9, { prop: '', mouth: 'smile' }), K(1)] },
     purr: { frames: 30, ms: 2300, loop: true, keys: [K(0, { eye: 'closed', tail: 3 }), K(.25, { sy: 1, hy: .5, tx: 1 }), K(.5, { sy: 0, hy: 0, tx: 0 }), K(.75, { sy: 1, hy: .5, tx: 1 }), K(1, { sy: 0, hy: 0, tx: 0 })] },
-    delivery: { frames: 24, ms: 1850, keys: [K(0, { prop: 'envelope', px: 32, py: 47 }), K(.2, { lx: -3, ly: -3, rx: 3, ry: -3, bx: -3, hx: -3, px: 29, py: 45 }), K(.42, { bx: 3, hx: 3, px: 35, py: 44, tail: 2 }), K(.62, { bx: -2, hx: -2, px: 30, py: 43, tail: 1 }), K(.82, { bx: 5, hx: 5, px: 39, py: 43, tail: 2 }), K(1, { bx: 6, hx: 6, prop: '' })] },
-    receive: { frames: 22, ms: 1700, keys: [K(0, { prop: 'envelope', px: 60, py: 43 }), K(.22, { hx: 3, rx: 5, ry: -5, px: 50, py: 43 }), K(.42, { hx: 5, rx: 4, ry: -9, px: 41, py: 43 }), K(.62, { hx: 1, rx: 0, ry: -5, px: 33, py: 44, eye: 'happy' }), K(.82, { px: 32, py: 46, eye: 'happy' }), K(1, { prop: '' })] }
+    delivery: { frames: 30, ms: 2050, keys: [K(0, { prop: 'envelope', px: 32, py: 39 }), K(.14, { by: 2, hx: -1, lx: -3, ly: -2, rx: 3, px: 30, py: 39 }), K(.3, { by: -1, hx: 1, lx: 2, rx: -2, px: 33, py: 38, tail: 2 }), K(.48, { by: 2, hx: -1, lx: -3, rx: 3, px: 31, py: 39 }), K(.66, { by: -1, hx: 2, lx: 3, rx: -2, px: 35, py: 38, tail: 1 }), K(.82, { hx: 4, rx: 4, ry: -5, px: 42, py: 39, eye: 'happy' }), K(.94, { hx: 4, rx: 5, ry: -7, px: 51, py: 39 }), K(1, { prop: '', rx: 5, ry: -6 })] },
+    receive: { frames: 28, ms: 2050, keys: [K(0, { prop: 'envelope', px: 62, py: 38 }), K(.16, { hx: 2, rx: 4, ry: -5, px: 56, py: 38 }), K(.32, { hx: 4, rx: 7, ry: -10, px: 49, py: 38 }), K(.48, { hx: 3, rx: 6, ry: -12, px: 43, py: 40, eye: 'happy' }), K(.65, { hx: 0, rx: 2, ry: -8, px: 36, py: 43, eye: 'happy' }), K(.82, { rx: 0, ry: -4, px: 32, py: 44, eye: 'closed' }), K(.94, { prop: 'heart', px: 47, py: 19, eye: 'happy' }), K(1, { prop: '' })] }
   };
 
   const TAILS = [
@@ -122,7 +131,7 @@
       host.appendChild(this.svg);
       host.classList.add('rigged');
       this.parts = {};
-      for (const id of ['stand', 'loaf', 'loaf-body', 'loaf-head', 'loaf-tail', 'loaf-eye-open', 'loaf-eye-closed', 'loaf-eye-happy', 'sleep', 'sleep-body', 'sleep-head', 'bed-back', 'bed-front', 'tail', 'tail-line', 'tail-color', 'tail-stripe', 'rear-left', 'rear-right', 'body', 'head', 'paw-left', 'paw-right', 'eye-open', 'eye-closed', 'eye-happy', 'mouth-smile', 'mouth-open', 'mouth-tongue', 'prop-fish', 'prop-heart', 'prop-yarn', 'prop-envelope', 'prop-spark', 'prop-z', 'prop-hand']) {
+      for (const id of ['stand', 'walk', 'walk-body', 'walk-head', 'walk-tail', 'walk-leg-near-back', 'walk-leg-near-front', 'walk-leg-far-back', 'walk-leg-far-front', 'loaf', 'loaf-body', 'loaf-head', 'loaf-tail', 'loaf-eye-open', 'loaf-eye-closed', 'loaf-eye-happy', 'sleep', 'sleep-body', 'sleep-head', 'bed-back', 'bed-front', 'tail', 'tail-line', 'tail-color', 'tail-stripe', 'rear-left', 'rear-right', 'body', 'head', 'paw-left', 'paw-right', 'eye-open', 'eye-closed', 'eye-happy', 'mouth-smile', 'mouth-open', 'mouth-tongue', 'prop-fish', 'prop-heart', 'prop-yarn', 'prop-envelope', 'prop-spark', 'prop-z', 'prop-hand']) {
         this.parts[id] = this.svg.querySelector(`#cat-${id}`);
       }
       this.tick = this.tick.bind(this);
@@ -149,12 +158,22 @@
       this.frame = frame;
       const s = sample(this.action, frame);
       const p = this.parts;
-      p.stand.setAttribute('display', s.sleepArt || s.loafArt ? 'none' : 'inline');
+      const walking = this.action === 'walk';
+      p.stand.setAttribute('display', s.sleepArt || s.loafArt || walking ? 'none' : 'inline');
+      p.walk.setAttribute('display', walking ? 'inline' : 'none');
       p.loaf.setAttribute('display', s.loafArt ? 'inline' : 'none');
       p.sleep.setAttribute('display', s.sleepArt ? 'inline' : 'none');
       p['bed-back'].setAttribute('display', s.bedArt ? 'inline' : 'none');
       p['bed-front'].setAttribute('display', s.bedArt ? 'inline' : 'none');
-      if (s.sleepArt) {
+      if (walking) {
+        p['walk-body'].setAttribute('transform', `translate(0 ${s.by})`);
+        p['walk-head'].setAttribute('transform', `translate(0 ${s.by + s.hy})`);
+        p['walk-tail'].setAttribute('transform', `translate(${s.tx} ${s.ty + s.by})`);
+        p['walk-leg-near-back'].setAttribute('transform', `translate(${s.lx} ${s.ly})`);
+        p['walk-leg-near-front'].setAttribute('transform', `translate(${s.rx} ${s.ry})`);
+        p['walk-leg-far-back'].setAttribute('transform', `translate(${s.rlx} ${s.rly})`);
+        p['walk-leg-far-front'].setAttribute('transform', `translate(${s.rrx} ${s.rry})`);
+      } else if (s.sleepArt) {
         p['sleep-body'].setAttribute('transform', `translate(0 ${s.sy})`);
         p['sleep-head'].setAttribute('transform', `translate(0 ${s.sy + (this.action === 'wake' ? -frame / 4 : 0)})`);
       } else if (s.loafArt) {

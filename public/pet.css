@@ -44,13 +44,13 @@
   transition: opacity .1s ease, visibility .1s ease;
 }
 .speech:empty { display: none; }
-.window.compact .companion-main:hover .speech,
-.window.compact .companion-main:hover .couple-badge,
-.window.compact .companion-main:hover .compact-actions,
-.window.compact .companion:has(.companion-main:hover) .compact-actions,
+.window.compact.cat-hovered .speech,
+.window.compact.cat-hovered .couple-badge,
+.window.compact.cat-hovered .compact-actions,
 .window.compact:has(.action-tray:not([hidden])) .compact-actions,
 .window.compact .compact-actions:hover,
-.window.compact .companion-main:hover .floor-shadow,
+.window.compact:has(.mascot-button:focus-visible) .compact-actions,
+.window.compact.cat-hovered .floor-shadow,
 .window.compact:focus-within .speech,
 .window.compact:focus-within .couple-badge {
   opacity: 1;
@@ -149,6 +149,11 @@
 .scan-results .scan-room { flex: none; color: #23866d; font-size: 10px; font-weight: 750; }
 .scan-results .scan-room.muted { color: #8da399; font-weight: 500; }
 .scan-results .scan-message { margin: 0; padding: 9px; color: #819b8d; font-size: 11px; line-height: 1.4; }
+.transfer-status { display: grid; gap: 4px; margin: 5px 3px 0; color: #6b8779; font-size: 10px; }
+.transfer-status progress { width: 100%; height: 5px; border: 0; border-radius: 3px; overflow: hidden; appearance: none; }
+.transfer-status progress::-webkit-progress-bar { background: #dce9e0; }
+.transfer-status progress::-webkit-progress-value { background: #3aab82; }
+.transfer-event .event-body { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-choice span { font-size: 15px; line-height: 17px; }
 .action-choice img { width: 16px; height: 16px; }
 .mascot { position: relative; }

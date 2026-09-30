@@ -1,6 +1,6 @@
 {
   "name": "hello-pet",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "private": true,
   "author": "Dongdong",
   "description": "A little desktop companion for two computers on Tailscale",
@@ -29,15 +29,30 @@
     "productName": "Dongdong",
     "icon": "assets/icon.png",
     "asar": true,
-    "files": ["electron/**/*", "public/**/*", "server/**/*", "assets/icon.png", "package.json"],
-    "directories": { "output": "release" },
+    "files": [
+      "electron/**/*",
+      "public/**/*",
+      "server/**/*",
+      "assets/icon.png",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
     "mac": {
       "category": "public.app-category.social-networking",
       "icon": "assets/icon.icns",
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "artifactName": "Dongdong-${version}-${arch}.dmg"
     },
-    "win": { "target": ["nsis"], "icon": "assets/icon.ico" },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

@@ -68,18 +68,6 @@
   transition: translate .42s cubic-bezier(.2,.8,.3,1);
   animation: delivery-step .62s steps(2, end) infinite;
 }
-.mascot.delivery::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -13px;
-  width: 86px;
-  height: 4px;
-  border-radius: 3px;
-  background: linear-gradient(90deg, #54aa88 0 calc(var(--delivery-progress, 0) * 100%), #dcebe3 0);
-  box-shadow: 0 0 7px #61b8958a;
-  translate: -50% 0;
-}
 .mascot.delivery::after {
   content: "";
   position: absolute;

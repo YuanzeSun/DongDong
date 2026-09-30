@@ -118,8 +118,8 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
   app.get('/api/events', (_req, res) => res.json(events));
 
   function validateDelivery(body) {
-    const input = body?.data && typeof body.data === 'object' ? body.data : body; const transferId = stringValue(input?.transferId, 120); const name = stringValue(input?.name, 180); const progress = Number(input?.progress); const status = stringValue(input?.status, 32);
-    return transferId && name && Number.isFinite(progress) && progress >= 0 && progress <= 100 && status ? { transferId, name, progress, status } : null;
+    const input = body?.data && typeof body.data === 'object' ? body.data : body; const transferId = stringValue(input?.transferId, 120); const name = stringValue(input?.name, 180); const progress = Number(input?.progress); const status = stringValue(input?.status, 32); const type = input?.type === 'file' ? 'file' : 'message';
+    return transferId && name && Number.isFinite(progress) && progress >= 0 && progress <= 100 && status ? { transferId, name, progress, status, type } : null;
   }
   app.post('/api/events', express.json({ limit: '32kb' }), (req, res) => {
     const { session } = req; const kind = req.body?.kind; const clientId = stringValue(req.body?.clientId, 120);
@@ -132,6 +132,7 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
     if (ACTION_KINDS.has(kind) && !activePeer(session)) return res.status(409).json({ error: '对方当前不在线' });
     const event = { id: crypto.randomUUID(), kind, text, senderId: session.senderId, senderName: session.senderName, createdAt: new Date().toISOString() };
     if (clientId) event.clientId = clientId; if (data) event.data = data;
+    if (kind === 'message') { const transferId = stringValue(req.body?.data?.transferId, 120); if (transferId) event.transferId = transferId; }
     const output = broadcastEvent(event, kind === 'message'); if (idempotenceKey) idempotent.set(idempotenceKey, output); res.status(201).json(output);
   });
 
@@ -151,9 +152,9 @@ function createRoom({ host, port = 4827, key, dataDir, staticDir, hostId }) {
   const upload = multer({ storage: multer.diskStorage({ destination: fileDir, filename: (_req, _file, callback) => callback(null, crypto.randomUUID()) }), limits: { fileSize: MAX_FILE_BYTES, files: 1 } });
   app.post('/api/files', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: '请选择文件' });
-    const explicit = typeof req.body?.fileName === 'string' && req.body.fileName.trim(); const originalName = normalizeFileName(explicit ? req.body.fileName : req.file.originalname, Boolean(explicit)); const clientId = stringValue(req.body?.clientId, 120); const idempotenceKey = clientId ? `${req.session.senderId}:${clientId}` : '';
+    const explicit = typeof req.body?.fileName === 'string' && req.body.fileName.trim(); const originalName = normalizeFileName(explicit ? req.body.fileName : req.file.originalname, Boolean(explicit)); const clientId = stringValue(req.body?.clientId, 120); const transferId = stringValue(req.body?.transferId, 120); const idempotenceKey = clientId ? `${req.session.senderId}:${clientId}` : '';
     if (idempotenceKey && idempotent.has(idempotenceKey)) { fs.rm(req.file.path, { force: true }, () => {}); return res.status(200).json(idempotent.get(idempotenceKey)); }
-    const event = { id: crypto.randomUUID(), kind: 'file', fileId: req.file.filename, fileName: originalName, size: req.file.size, senderId: req.session.senderId, senderName: req.session.senderName, createdAt: new Date().toISOString() }; if (clientId) event.clientId = clientId;
+    const event = { id: crypto.randomUUID(), kind: 'file', fileId: req.file.filename, fileName: originalName, size: req.file.size, senderId: req.session.senderId, senderName: req.session.senderName, createdAt: new Date().toISOString() }; if (clientId) event.clientId = clientId; if (transferId) event.transferId = transferId;
     broadcastEvent(event, true); if (idempotenceKey) idempotent.set(idempotenceKey, event); res.status(201).json(event);
   });
   app.get('/api/files/:id', (req, res) => { const event = events.find(item => item.kind === 'file' && item.fileId === req.params.id); if (!event) return res.sendStatus(404); res.download(path.join(fileDir, event.fileId), event.fileName); });
