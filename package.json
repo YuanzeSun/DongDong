@@ -2,6 +2,7 @@
   "name": "hello-pet",
   "version": "0.2.3",
   "private": true,
+  "author": "Dongdong",
   "description": "A little desktop companion for two computers on Tailscale",
   "main": "electron/main.cjs",
   "scripts": {
