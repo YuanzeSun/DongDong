@@ -75,7 +75,7 @@ function setPose(pose) {
   pet.style.backgroundImage = `url('./${sprite}.svg')`;
   if (pose === 'wave') pet.classList.add('wiggle');
   if (pose === 'happy') pet.classList.add('happy');
-  if (pose === 'nap') pet.classList.add('nap');
+  if (pose === 'nap' || pose === 'sleep') pet.classList.add('nap', 'sleep');
   if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(pose)) pet.classList.add(pose);
 }
 
