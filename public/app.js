@@ -71,7 +71,13 @@ function setPose(pose) {
   // Keep the sprite visible even when a logical action has no dedicated art.
   // A missing background image makes the transparent mascot look like it
   // vanished mid-action, which is especially jarring for remote gestures.
-  const sprite = { idle: 'mascot', sleep: 'mascot-nap' }[pose] || `mascot-${pose}`;
+  const sprite = {
+    idle: 'mascot', nap: 'mascot-nap', sleep: 'mascot-nap',
+    blink: 'mascot-blink', wave: 'mascot-wave', happy: 'mascot-happy', jump: 'mascot-jump',
+    pet: 'mascot-pet', fish: 'mascot-fish', sit: 'mascot-sit', stretch: 'mascot-stretch',
+    hug: 'mascot-hug', kiss: 'mascot-kiss', groom: 'mascot-groom', purr: 'mascot-purr',
+    'walk-1': 'mascot-walk-1', 'walk-2': 'mascot-walk-2'
+  }[pose] || 'mascot';
   pet.style.backgroundImage = `url('./${sprite}.svg')`;
   if (pose === 'wave') pet.classList.add('wiggle');
   if (pose === 'happy') pet.classList.add('happy');
