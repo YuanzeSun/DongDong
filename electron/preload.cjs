@@ -1,9 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const panelArgument = process.argv.find(value => value.startsWith('--dongdong-panel='));
+const panelKind = panelArgument?.slice('--dongdong-panel='.length) || new URLSearchParams(globalThis.location?.search || '').get('panel') || '';
 
 contextBridge.exposeInMainWorld('petDesktop', {
   // Panels are regular windows. They share the renderer's session storage with the mascot,
   // while their native close button only closes that panel.
-  panelKind: new URLSearchParams(globalThis.location?.search || '').get('panel') || '',
+  panelKind,
   openPanel: kind => ipcRenderer.invoke('open-panel', kind),
   closePanel: () => ipcRenderer.invoke('close-panel'),
   addresses: () => ipcRenderer.invoke('addresses'),

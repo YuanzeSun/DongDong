@@ -74,7 +74,8 @@ else {
         preload: path.join(__dirname, 'preload.cjs'),
         contextIsolation: true,
         sandbox: true,
-        nodeIntegration: false
+        nodeIntegration: false,
+        additionalArguments: [`--dongdong-panel=${kind}`]
       }
     });
     panelWindows.set(kind, panel);
