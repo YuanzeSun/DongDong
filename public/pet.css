@@ -36,8 +36,7 @@
 .window.compact .companion-main:hover .compact-actions,
 .window.compact .companion-main:hover .floor-shadow,
 .window.compact:focus-within .speech,
-.window.compact:focus-within .couple-badge,
-.window.compact:focus-within .compact-actions {
+.window.compact:focus-within .couple-badge {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;

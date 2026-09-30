@@ -466,8 +466,9 @@ function renderEvent(event) {
 function onEvent(event) {
   if (seenEvents.has(event.id)) return;
   seenEvents.add(event.id);
-  if (event.senderId !== senderId) unpeek(true);
+  if (event.senderId !== senderId && !panelMode) unpeek(true);
   if (event.kind === 'delivery') {
+    if (panelMode) return;
     if (event.senderId !== senderId) {
       const data = event.data || {};
       const name = data.name || String(event.text || '').split('|')[0] || '一封信';
@@ -480,6 +481,9 @@ function onEvent(event) {
   }
   $('events').querySelector('.empty-state')?.remove();
   renderEvent(event);
+  // The mascot window owns animations and notifications. A history panel only
+  // mirrors the live event stream, otherwise opening it would duplicate effects.
+  if (panelMode) return;
   const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
   if (event.kind === 'walk' && desktop && !panelMode) desktop.startWalk();
   else if (event.kind === 'walk') animateRemoteAction('happy');
@@ -932,7 +936,7 @@ async function init() {
         const result = await desktop.startHost(address, senderId);
         state.hostStarted = true;
         await connect(result.url, result.key, saved.name, 'host');
-      } else await connect(saved.url, saved.key, saved.name, 'join');
+      } else await connect(saved.url, saved.key, saved.name, saved.mode);
     } catch { $('setupFeedback').textContent = '上次的房间暂时无法连接，请重新尝试'; }
   }
 }
