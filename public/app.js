@@ -1,5 +1,7 @@
 const $ = id => document.getElementById(id);
 const desktop = window.petDesktop;
+const panelKind = desktop?.panelKind || '';
+const panelMode = panelKind === 'chat' || panelKind === 'settings';
 const SESSION_KEY = 'dongdong-session-v3';
 const senderId = localStorage.getItem('dongdong-sender-id-v3') || crypto.randomUUID();
 localStorage.setItem('dongdong-sender-id-v3', senderId);
@@ -23,6 +25,8 @@ let peekOutingTimer;
 let edgeHoldTimer;
 let deliveryFinishTimer;
 const pendingDeliveries = new Map();
+
+if (panelMode) document.body.classList.add('panel-mode');
 
 function speak(message, kind = 'normal') {
   $('speech').textContent = message;
@@ -233,8 +237,12 @@ function animateLocalAction(kind) {
   clearTimeout(state.idleTimer);
   clearTimeout(poseTimer);
   if (kind === 'walk') {
-    if (desktop) desktop.startWalk();
-    else animateRemoteAction('happy');
+    const animateInPlace = () => {
+      onWalkState(true);
+      setTimeout(() => { if (state.walking) onWalkState(false); }, 1600);
+    };
+    if (desktop) Promise.resolve(desktop.startWalk()).then(started => { if (!started) animateInPlace(); }).catch(animateInPlace);
+    else animateInPlace();
     return;
   }
   if (kind === 'wave') {
@@ -289,13 +297,13 @@ function setQuickComposer(open) {
 function setExpanded(expanded) {
   state.expanded = expanded;
   setQuickComposer(false);
-  if (expanded) unpeek(true);
+  if (expanded && !panelMode) unpeek(true);
   $('window').classList.toggle('compact', !expanded);
   $('expanded').hidden = !expanded;
   $('compactActions').hidden = expanded;
-  const resized = desktop?.setWindowSize(expanded);
-  if (!expanded) schedulePeek();
-  if (expanded) setTimeout(() => $('messageInput').focus(), 100);
+  const resized = panelMode ? undefined : desktop?.setWindowSize(expanded);
+  if (!expanded && !panelMode) schedulePeek();
+  if (expanded && !panelMode) setTimeout(() => $('messageInput').focus(), 100);
   return resized;
 }
 
@@ -327,6 +335,10 @@ function setView(view) {
 }
 
 function returnFromSettings() {
+  if (panelMode) {
+    desktop?.closePanel();
+    return;
+  }
   if (!$('appSettings').hidden) {
     $('appSettings').hidden = true;
     if (state.connected) {
@@ -543,8 +555,15 @@ async function connect(url, key, name, mode) {
   }
   applyProfile(state.profile);
   setPeerOnline(session.presence || false);
-  setView('chat');
-  setExpanded(!desktop);
+  if (panelMode) {
+    $('window').classList.remove('compact');
+    $('expanded').hidden = false;
+    $('compactActions').hidden = true;
+    setView(panelKind === 'settings' ? 'connection' : 'chat');
+  } else {
+    setView('chat');
+    setExpanded(!desktop);
+  }
   setStatus('已连接', 'online');
   setPose('idle');
   scheduleNap();
@@ -581,7 +600,7 @@ async function disconnect() {
   state.socket?.close();
   state.socket = null;
   state.token = '';
-  if (state.hostStarted && desktop) await desktop.stopHost();
+  if (state.hostStarted && desktop && !panelMode) await desktop.stopHost();
   state.hostStarted = false;
   localStorage.removeItem(SESSION_KEY);
   $('companion').hidden = true;
@@ -592,7 +611,8 @@ async function disconnect() {
   $('settingsButton').hidden = false;
   state.peerOnline = false;
   setStatus('待连接');
-  if (desktop) desktop.setWindowSize(true);
+  if (desktop && !panelMode) desktop.setWindowSize(true);
+  if (panelMode) desktop?.closePanel();
 }
 
 async function sendEvent(kind, text = '', data = {}) {
