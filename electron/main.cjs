@@ -12,6 +12,9 @@ const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 else {
   let window; let tray; let room; let walkTimer; let isQuitting = false; let isOnline = true; let peeked = false;
+  // The mascot window is intentionally independent from these regular utility windows. Closing
+  // a panel must never hide the mascot, and closing the mascot must not tear down a panel.
+  const panelWindows = new Map();
   const savedDownloads = new Set(); const menuListeners = new Set();
   const sendMenuAction = action => { for (const listener of menuListeners) listener(action); };
   function stopWalk() { if (walkTimer) clearInterval(walkTimer); walkTimer = null; if (window && !window.isDestroyed()) window.webContents.send('walk-state', false); }
@@ -43,10 +46,52 @@ else {
   function configPath() { return path.join(app.getPath('userData'), 'room-config-v3.json'); }
   function getKey() { try { const key = JSON.parse(fs.readFileSync(configPath(), 'utf8')).key; if (typeof key === 'string' && key.length >= 20) return key; } catch { /* First launch. */ } const key = crypto.randomBytes(24).toString('base64url'); fs.mkdirSync(app.getPath('userData'), { recursive: true }); fs.writeFileSync(configPath(), JSON.stringify({ key }), { mode: 0o600 }); return key; }
   function showWindow() { if (!window || window.isDestroyed()) return; window.show(); window.focus(); sendMenuAction('show'); }
-  function quitApp() { isQuitting = true; stopWalk(); if (room) room.close().catch(() => {}); app.quit(); }
+  function quitApp() { isQuitting = true; stopWalk(); for (const panel of panelWindows.values()) if (!panel.isDestroyed()) panel.close(); panelWindows.clear(); if (room) room.close().catch(() => {}); app.quit(); }
+  function panelKind(value) {
+    const kind = String(value || '').toLowerCase();
+    if (!['chat', 'settings'].includes(kind)) throw new Error('辅助窗口类型无效');
+    return kind;
+  }
+  function openPanel(value) {
+    const kind = panelKind(value);
+    const existing = panelWindows.get(kind);
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore();
+      existing.show(); existing.focus();
+      return true;
+    }
+    const panel = new BrowserWindow({
+      width: kind === 'chat' ? 430 : 420,
+      height: kind === 'chat' ? 620 : 560,
+      minWidth: 360,
+      minHeight: 420,
+      title: kind === 'chat' ? 'Dongdong · 消息' : 'Dongdong · 设置',
+      icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: '#f8fbf9',
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.cjs'),
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false
+      }
+    });
+    panelWindows.set(kind, panel);
+    panel.once('ready-to-show', () => { if (!panel.isDestroyed()) panel.show(); });
+    panel.on('closed', () => { if (panelWindows.get(kind) === panel) panelWindows.delete(kind); });
+    panel.loadFile(path.join(__dirname, '..', 'public', 'index.html'), { search: `?panel=${kind}` });
+    return true;
+  }
+  function closePanel(sender) {
+    const panel = BrowserWindow.fromWebContents(sender);
+    if (!panel || panel === window || panel.isDestroyed()) return false;
+    panel.close();
+    return true;
+  }
   function createTray() {
     tray = new Tray(path.join(__dirname, '..', 'assets', 'icon.png')); tray.setToolTip('Dongdong');
-    tray.setContextMenu(Menu.buildFromTemplate([{ label: '显示东东', click: showWindow }, { label: '设置', click: () => { showWindow(); sendMenuAction('settings'); } }, { type: 'separator' }, { label: '退出', click: quitApp }])); tray.on('click', showWindow);
+    tray.setContextMenu(Menu.buildFromTemplate([{ label: '显示东东', click: showWindow }, { label: '设置', click: () => openPanel('settings') }, { type: 'separator' }, { label: '退出', click: quitApp }])); tray.on('click', showWindow);
   }
   function createWindow() {
     window = new BrowserWindow({ width: 420, height: 700, minWidth: 280, minHeight: 300, icon: path.join(__dirname, '..', 'assets', 'icon.png'), frame: false, transparent: true, alwaysOnTop: true, resizable: false, hasShadow: false, skipTaskbar: false, backgroundColor: '#00000000', show: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
@@ -72,6 +117,8 @@ else {
     ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', () => startWalk()); ipcMain.handle('stop-walk', () => stopWalk());
     ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) stopWalk(); return isOnline; }); ipcMain.handle('set-ignore-mouse-events', (_event, ignore, options = {}) => window?.setIgnoreMouseEvents(Boolean(ignore), { forward: options.forward !== false }));
     ipcMain.handle('set-peeked', (_event, next) => setPeeked(next));
+    ipcMain.handle('open-panel', (_event, kind) => openPanel(kind));
+    ipcMain.handle('close-panel', event => closePanel(event.sender));
     ipcMain.handle('copy', (_event, value) => clipboard.writeText(String(value).slice(0, 500))); ipcMain.handle('get-downloads-path', () => app.getPath('downloads'));
     ipcMain.handle('save-download', async (_event, data, requestedName) => { const savedPath = await saveUniqueDownload(app.getPath('downloads'), downloadBuffer(data, MAX_DOWNLOAD_BYTES), requestedName); savedDownloads.add(path.resolve(savedPath)); return savedPath; });
     ipcMain.handle('reveal-download', async (_event, requestedPath) => { const resolved = path.resolve(String(requestedPath || '')); if (!savedDownloads.has(resolved)) throw new Error('只能打开本次保存的文件'); await shell.showItemInFolder(resolved); return true; }); ipcMain.handle('open-downloads', () => shell.openPath(app.getPath('downloads')));
