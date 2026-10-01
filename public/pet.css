@@ -47,6 +47,7 @@
 .window.compact.cat-hovered .speech,
 .window.compact.cat-hovered .couple-badge,
 .window.compact.cat-hovered .compact-actions,
+.window.compact.actions-held .compact-actions,
 .window.compact:has(.action-tray:not([hidden])) .compact-actions,
 .window.compact .compact-actions:hover,
 .window.compact:has(.mascot-button:focus-visible) .compact-actions,

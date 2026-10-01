@@ -43,7 +43,9 @@ const transferStates = new Map();
 const transferRows = new Map();
 let ignoringMouse = false;
 let lastPointer = null;
-let catHoverUntil = 0;
+const ACTIONS_LINGER_MS = 2000;
+let actionsHoverUntil = 0;
+let actionsHideTimer;
 const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, moved: false, suppressClick: false };
 
 if (panelMode) document.body.classList.add('panel-mode');
@@ -565,15 +567,28 @@ function syncMousePassThrough() {
   if (!desktop?.setIgnoreMouseEvents || panelMode) return;
   const compact = state.connected && $('window').classList.contains('compact');
   const cat = compact && overVisibleCat(lastPointer);
+  const keyboardRevealed = compact && $('mascotButton').matches(':focus-visible');
+  const actions = compact && !$('compactActions').hidden && insideRect(lastPointer, $('compactActions'))
+    && (actionsHoverUntil > Date.now() || keyboardRevealed);
+  clearTimeout(actionsHideTimer);
+  if (!compact) actionsHoverUntil = 0;
+  else if (cat || actions) actionsHoverUntil = Date.now() + ACTIONS_LINGER_MS;
+  const held = compact && actionsHoverUntil > Date.now();
+  if (held && !cat && !actions) {
+    actionsHideTimer = setTimeout(syncMousePassThrough, actionsHoverUntil - Date.now() + 1);
+  }
   $('window').classList.toggle('cat-hovered', Boolean(cat));
+  $('window').classList.toggle('actions-held', held);
   let interactive = !compact || mascotDrag.pointerId !== null;
   if (compact && !interactive) {
     interactive = !$('actionTray').hidden || !$('quickMessageForm').hidden || !$('contextMenu').hidden || !$('dropOverlay').hidden;
     if (!interactive && lastPointer) {
-      if (cat) catHoverUntil = Date.now() + 180;
-      const actions = insideRect(lastPointer, $('compactActions'))
-        && (Date.now() < catHoverUntil || getComputedStyle($('compactActions')).visibility === 'visible');
-      interactive = cat || actions;
+      const mascotRect = $('mainMascot').getBoundingClientRect();
+      const actionsRect = $('compactActions').getBoundingClientRect();
+      // Keep the short path below the cat interactive while the toolbar lingers.
+      const bridge = held && lastPointer.x >= mascotRect.left - 8 && lastPointer.x <= mascotRect.right + 8
+        && lastPointer.y >= mascotRect.bottom - 8 && lastPointer.y <= actionsRect.top;
+      interactive = cat || actions || bridge;
     }
   }
   const nextIgnored = !interactive;
@@ -585,6 +600,7 @@ function syncMousePassThrough() {
 function setQuickComposer(open) {
   const form = $('quickMessageForm');
   if (!form) return;
+  if (!open && !form.hidden) actionsHoverUntil = Date.now() + ACTIONS_LINGER_MS;
   form.hidden = !open;
   $('window').classList.toggle('quick-composing', open);
   if (open) {
@@ -597,6 +613,7 @@ function setQuickComposer(open) {
 }
 
 function setActionTray(open) {
+  if (!open && !$('actionTray').hidden) actionsHoverUntil = Date.now() + ACTIONS_LINGER_MS;
   $('actionTray').hidden = !open;
   $('actionMenuButton').setAttribute('aria-expanded', String(open));
   syncMousePassThrough();
@@ -1229,6 +1246,8 @@ async function init() {
     syncMousePassThrough();
   });
   document.addEventListener('mouseleave', () => { lastPointer = null; syncMousePassThrough(); });
+  document.addEventListener('focusin', syncMousePassThrough);
+  document.addEventListener('focusout', syncMousePassThrough);
   if (panelMode && panelKind === 'settings' && !localStorage.getItem(SESSION_KEY)) {
     $('setup').hidden = true;
     $('appSettings').hidden = false;
