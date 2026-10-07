@@ -46,7 +46,9 @@ test('only the receiver retries an uploaded file after saving fails', async () =
 
     downloads = path.join(root, 'downloads');
     receiver.retry({ url, token: guest.token, transferId: 'letter' });
-    const saved = await waitFor(receiver, item => item.phase === 'saved' && !item.canCancel);
+    // The saved phase precedes its HTTP receipt; await the existing retry task
+    // before checking the sender's view of that receipt.
+    const saved = await receiver.download({ url, token: guest.token, fileId: uploaded.fileId, fileName: 'letter.txt', transferId: 'letter' });
     assert.equal(fs.readFileSync(saved.savedPath, 'utf8'), 'a letter');
     await sync();
     assert.equal(sender.snapshot()[0].phase, 'saved');
