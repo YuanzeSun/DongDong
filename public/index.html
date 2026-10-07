@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="./pet.css">
   <link rel="stylesheet" href="./animations.css">
   <script src="./mascot-animator.js" defer></script>
+  <script src="./connection-policy.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
@@ -54,11 +55,16 @@
         <button class="view-back-button" id="settingsBackButton" type="button" title="回到连接"><img src="./icons/arrow-left.svg" alt=""><span>回到连接</span></button>
         <h1>应用设置</h1>
       </div>
-      <p class="settings-intro">调整小橘的启动方式和陪伴节奏。</p>
-      <label class="setting-row" for="autoLaunchSetup"><span><strong>开机自启动</strong><small>登录系统后自动打开小橘</small></span><input type="checkbox" id="autoLaunchSetup"></label>
-      <label class="setting-row" for="idleActionsToggle"><span><strong>允许小猫自己玩</strong><small>对方在线时偶尔眨眼、打盹或撒娇</small></span><input type="checkbox" id="idleActionsToggle" checked></label>
-      <label class="setting-row" for="edgeHideToggle"><span><strong>长时间无操作时靠边</strong><small>偶尔出来活动，互动后会留下片刻</small></span><input type="checkbox" id="edgeHideToggle"></label>
-      <label class="setting-row" for="desktopNotificationsToggle"><span><strong>桌面通知</strong><small>收到消息或文件时提醒我</small></span><input type="checkbox" id="desktopNotificationsToggle" checked></label>
+      <div id="setupPreferences">
+        <section class="preference-settings" id="preferenceSettings" aria-labelledby="preferencesTitle">
+          <h2 class="settings-title" id="preferencesTitle">应用偏好</h2>
+          <p class="settings-intro">调整小橘的启动方式和陪伴节奏。</p>
+          <label class="setting-row" for="autoLaunchSetup"><span><strong>开机自启动</strong><small>登录系统后自动打开小橘</small></span><input type="checkbox" id="autoLaunchSetup"></label>
+          <label class="setting-row" for="idleActionsToggle"><span><strong>允许小猫自己玩</strong><small>对方在线时偶尔眨眼、打盹或撒娇</small></span><input type="checkbox" id="idleActionsToggle" checked></label>
+          <label class="setting-row" for="edgeHideToggle"><span><strong>长时间无操作时靠边</strong><small>偶尔出来活动，互动后会留下片刻</small></span><input type="checkbox" id="edgeHideToggle"></label>
+          <label class="setting-row" for="desktopNotificationsToggle"><span><strong>桌面通知</strong><small>收到消息或文件时提醒我</small></span><input type="checkbox" id="desktopNotificationsToggle" checked></label>
+        </section>
+      </div>
     </section>
 
     <section class="companion" id="companion" hidden>
@@ -69,7 +75,7 @@
         <span class="floor-shadow"></span>
         <div class="context-menu" id="contextMenu" hidden>
           <button id="contextHistory">消息记录</button>
-          <button id="contextSettings">房间设置</button>
+          <button id="contextSettings">设置</button>
         </div>
       </div>
       <div class="compact-actions" id="compactActions">
@@ -113,7 +119,9 @@
           </form>
         </div>
         <div id="connectionView" class="connection-view" hidden>
-          <h2 class="settings-title">房间设置</h2>
+          <div id="connectionPreferences"></div>
+          <section class="room-settings" aria-labelledby="roomSettingsTitle">
+          <h2 class="settings-title" id="roomSettingsTitle">房间设置</h2>
           <div class="presence-card"><span class="presence-dot" id="presenceDot"></span><span id="presenceText">正在检查对方状态…</span></div>
           <p class="connection-label">房间地址</p><div class="copy-line"><code id="roomAddress"></code><button class="icon-button copy-button" id="copyAddress" title="复制地址" aria-label="复制地址"><img src="./icons/copy.svg" alt=""></button></div>
           <div id="hostKeyBlock"><p class="connection-label">配对码</p><div class="copy-line"><code id="roomKey"></code><button class="icon-button copy-button" id="copyKey" title="复制配对码" aria-label="复制配对码"><img src="./icons/copy.svg" alt=""></button></div></div>
@@ -123,9 +131,9 @@
             <label>小猫昵称<input id="profilePetName" maxlength="24" placeholder="例如：橘子"></label>
             <button class="secondary-button" id="saveProfileButton" type="button">保存共享资料</button>
           </div>
-          <label class="setting-row" for="autoLaunchToggle"><span><strong>开机自启动</strong><small>登录系统后自动打开小橘</small></span><input type="checkbox" id="autoLaunchToggle"></label>
           <button class="text-button" id="openDownloadsButton" type="button">打开下载文件夹</button>
           <button class="text-button disconnect-button" id="disconnectButton">退出房间</button>
+          </section>
         </div>
       </div>
     </section>

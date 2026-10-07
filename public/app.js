@@ -36,11 +36,18 @@ let peekOutingTimer;
 let edgeHoldTimer;
 let deliveryFinishTimer;
 let connectionEpoch = 0;
+let reconnectAttempt = 0;
+let retryInFlightEpoch = null;
+let socketConnectTimer;
+let offlineNapDeadline = 0;
+let hostNeedsStart = false;
+let recoveryBlocked = false;
 const pendingDeliveries = new Map();
 const activeDownloads = new Set();
 const savedFileIds = new Set(JSON.parse(localStorage.getItem(SAVED_FILES_KEY) || '[]'));
 const transferStates = new Map();
 const transferRows = new Map();
+const activeTransferAnimations = new Set();
 let ignoringMouse = false;
 let lastPointer = null;
 const ACTIONS_LINGER_MS = 2000;
@@ -51,6 +58,7 @@ const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, 
 if (panelMode) document.body.classList.add('panel-mode');
 
 function speak(message, kind = 'normal') {
+  if (panelMode) return;
   $('speech').textContent = message;
   $('speech').classList.remove('speech-pop', 'speech-alert');
   void $('speech').offsetWidth;
@@ -69,6 +77,7 @@ const ACTION_VOICES = {
   kiss: ['啾～', '咪！'], purr: ['呼噜噜～', '咕噜咕噜～']
 };
 function actionVoice(pose) {
+  if (panelMode) return;
   const bubble = $('voiceBubble');
   clearTimeout(voiceTimer);
   const options = ACTION_VOICES[pose];
@@ -79,8 +88,13 @@ function actionVoice(pose) {
 }
 
 function setAutoLaunchToggles(value) {
-  $('autoLaunchToggle').checked = Boolean(value);
   $('autoLaunchSetup').checked = Boolean(value);
+}
+
+function placePreferences() {
+  const destination = $(state.connected ? 'connectionPreferences' : 'setupPreferences');
+  if ($('preferenceSettings').parentElement !== destination) destination.appendChild($('preferenceSettings'));
+  if (state.connected) $('appSettings').hidden = true;
 }
 
 function toast(message) {
@@ -102,6 +116,7 @@ function updateConnectionStatus() {
 }
 
 function setPose(pose) {
+  if (panelMode) return;
   const previous = state.pose.startsWith('walk-') ? 'walk' : state.pose;
   const next = pose.startsWith('walk-') ? 'walk' : pose;
   clearTimeout(wakeTimer);
@@ -131,6 +146,7 @@ function setPose(pose) {
 }
 
 function wakeThen(callback) {
+  if (panelMode) return;
   const pet = $('mainMascot');
   const resting = state.pose;
   if (!['nap', 'sleep', 'nest', 'nest-enter', 'loaf', 'loaf-enter', 'purr'].includes(resting)) return callback();
@@ -150,6 +166,7 @@ function wakeThen(callback) {
 }
 
 function transitionPose(pose, onReady = () => {}) {
+  if (panelMode) return;
   if (pose === 'loaf' || pose === 'nest') {
     if (state.pose === pose) return onReady();
     wakeThen(() => {
@@ -172,6 +189,7 @@ function transitionPose(pose, onReady = () => {}) {
 }
 
 function interruptMotion() {
+  if (panelMode) return;
   const wasWalking = state.walking;
   const wasJumping = state.jumping;
   const pending = motionPendingKind;
@@ -185,18 +203,21 @@ function interruptMotion() {
 }
 
 function scheduleNap() {
+  if (panelMode) return;
   clearTimeout(napTimer);
   napTimer = setTimeout(() => {
     if (!state.connected) return;
+    if (activeTransferAnimations.size) return;
     if (state.peerOnline) {
       if (['idle', 'loaf'].includes(state.pose)) transitionPose('nest');
       return scheduleIdleAction();
     }
     setPose('nap');
-  }, state.peerOnline ? 45000 : 250);
+  }, state.peerOnline ? 45000 : Math.max(250, offlineNapDeadline - Date.now()));
 }
 
 function schedulePeek() {
+  if (panelMode) return;
   clearTimeout(peekTimer);
   if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return;
   peekTimer = setTimeout(() => {
@@ -212,6 +233,7 @@ function schedulePeek() {
 function setEdgeHide(enabled) {
   state.edgeHideEnabled = Boolean(enabled);
   $('edgeHideToggle').checked = state.edgeHideEnabled;
+  if (panelMode) return;
   if (state.edgeHideEnabled) return schedulePeek();
   clearTimeout(peekTimer);
   clearTimeout(peekOutingTimer);
@@ -222,6 +244,7 @@ function setEdgeHide(enabled) {
 }
 
 function schedulePeekOuting() {
+  if (panelMode) return;
   clearTimeout(peekOutingTimer);
   if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold) return;
   peekOutingTimer = setTimeout(() => {
@@ -243,6 +266,7 @@ function schedulePeekOuting() {
 }
 
 function finishPeekOuting() {
+  if (panelMode) return;
   if (!state.edgeAutoOuting) return;
   state.edgeAutoOuting = false;
   if (!state.edgeHideEnabled || !state.connected || state.expanded || state.edgeHold) return;
@@ -254,6 +278,7 @@ function finishPeekOuting() {
 }
 
 function unpeek(userInitiated = false) {
+  if (panelMode) return;
   clearTimeout(peekTimer);
   clearTimeout(peekOutingTimer);
   const wasEdgeState = state.peeked || state.edgeAutoOuting;
@@ -276,6 +301,7 @@ function unpeek(userInitiated = false) {
 }
 
 function scheduleIdleAction() {
+  if (panelMode) return;
   clearTimeout(state.idleTimer);
   if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || !state.idleActions) return;
   state.idleTimer = setTimeout(() => {
@@ -303,11 +329,31 @@ function scheduleIdleAction() {
   }, 28000 + Math.random() * 24000);
 }
 
+function startCatActivity() {
+  if (panelMode) return;
+  setPose('idle');
+  scheduleNap();
+  clearInterval(blinkTimer);
+  blinkTimer = setInterval(() => {
+    if (!state.connected || state.walking || state.pose !== 'idle') return;
+    setPose('blink');
+    setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, catAnimator?.durationFor('blink') || 170);
+  }, 6800);
+  scheduleIdleAction();
+  schedulePeek();
+}
+
 function setPeerOnline(online) {
   const presence = typeof online === 'object' ? online : { online };
+  if (state.peerOnline && !presence.online) offlineNapDeadline = Date.now() + 3000;
+  if (presence.online) { offlineNapDeadline = 0; clearTimeout(napTimer); }
   state.peerOnline = Boolean(presence.online);
   state.peerName = presence.peerName || state.peerName || '对方';
-  desktop?.setOnline(state.peerOnline);
+  if (!panelMode) desktop?.setOnline(state.peerOnline);
+  if (!state.peerOnline && !panelMode) {
+    for (const item of transferStates.values()) if (item.roomUrl === state.url
+      && (item.phase === 'uploaded' || item.phase === 'uploading' && item.direction === 'receive')) showTransfer(item);
+  }
   $('presenceText').textContent = state.peerOnline ? `${state.peerName} 在线` : `${state.peerName} 离线，小猫正在休息`;
   $('presenceDot').classList.toggle('online', state.peerOnline);
   $('presenceDot').classList.toggle('offline', !state.peerOnline);
@@ -322,6 +368,7 @@ function setPeerOnline(online) {
 }
 
 function animatePet(kind = 'happy') {
+  if (panelMode) return;
   interruptMotion();
   const epoch = ++actionEpoch;
   clearTimeout(poseTimer);
@@ -335,7 +382,12 @@ function animatePet(kind = 'happy') {
   if (state.peerOnline) scheduleNap();
 }
 
-function animateDelivery(progress = 1) {
+function animateDelivery(progress = 1, hold = false) {
+  if (panelMode) return;
+  if (hold && catAnimator?.action === 'delivery-hold') {
+    $('mainMascot').style.setProperty('--delivery-progress', String(progress));
+    return;
+  }
   interruptMotion();
   const epoch = ++actionEpoch;
   clearTimeout(poseTimer);
@@ -344,21 +396,23 @@ function animateDelivery(progress = 1) {
   clearTimeout(state.idleTimer);
   wakeThen(() => {
     if (epoch !== actionEpoch) return;
+    if (hold && !activeTransferAnimations.size) return;
     const pet = $('mainMascot');
-    const continuing = pet.classList.contains('delivery') && catAnimator?.action === 'delivery';
+    const continuing = pet.classList.contains('delivery') && catAnimator?.action === (hold ? 'delivery-hold' : 'delivery');
     if (!continuing) {
-      setPose('idle');
+      setPose(hold ? 'delivery-hold' : 'idle');
       pet.classList.remove('delivery');
       void pet.offsetWidth;
       pet.classList.add('delivery');
-      catAnimator?.play('delivery');
+      catAnimator?.play(hold ? 'delivery-hold' : 'delivery');
     }
     pet.style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, progress))));
-    deliveryFinishTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('delivery'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, 2600);
+    if (!hold) deliveryFinishTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('delivery'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, 2600);
   });
 }
 
 function animateReceive() {
+  if (panelMode) return;
   interruptMotion();
   const epoch = ++actionEpoch;
   clearTimeout(poseTimer);
@@ -373,11 +427,16 @@ function animateReceive() {
     void pet.offsetWidth;
     pet.classList.add('receive');
     catAnimator?.play('receive');
-    poseTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('receive'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, (catAnimator?.durationFor('receive') || 1600) + 80);
+    poseTimer = setTimeout(() => { if (epoch === actionEpoch) {
+      pet.classList.remove('receive');
+      if (activeTransferAnimations.size) animateDelivery(0, true);
+      else { transitionPose(state.peerOnline ? 'idle' : 'nap'); scheduleNap(); scheduleIdleAction(); }
+    } }, (catAnimator?.durationFor('receive') || 1600) + 80);
   });
 }
 
 function animateRemoteAction(kind) {
+  if (panelMode) return;
   interruptMotion();
   const epoch = ++actionEpoch;
   clearTimeout(poseTimer);
@@ -406,12 +465,14 @@ function animateRemoteAction(kind) {
 }
 
 function animateWalkFallback() {
+  if (panelMode) return;
   onWalkState(true);
   clearTimeout(walkFallbackTimer);
   walkFallbackTimer = setTimeout(() => { if (state.walking) onWalkState(false); }, 1600);
 }
 
 function startMotion(kind) {
+  if (panelMode) return;
   interruptMotion();
   const epoch = ++actionEpoch;
   clearTimeout(poseTimer);
@@ -443,6 +504,7 @@ function startMotion(kind) {
 }
 
 function animateLocalAction(kind) {
+  if (panelMode) return;
   clearTimeout(napTimer);
   clearTimeout(state.idleTimer);
   clearTimeout(poseTimer);
@@ -635,6 +697,7 @@ function setExpanded(expanded) {
 }
 
 function onWalkState(walking) {
+  if (panelMode) return;
   if (!walking && !state.walking) return;
   state.walking = walking;
   clearInterval(walkFrameTimer);
@@ -662,6 +725,7 @@ function onWalkState(walking) {
 }
 
 function onJumpState(jumping) {
+  if (panelMode) return;
   if (!jumping && !state.jumping) return;
   state.jumping = jumping;
   if (jumping) {
@@ -687,6 +751,7 @@ function onJumpState(jumping) {
 }
 
 function setView(view) {
+  placePreferences();
   state.view = view;
   $('chatTab').classList.toggle('selected', view === 'chat');
   $('connectionTab').classList.toggle('selected', view === 'connection');
@@ -694,6 +759,7 @@ function setView(view) {
   $('connectionTab').setAttribute('aria-selected', view === 'connection');
   $('chatView').hidden = view !== 'chat';
   $('connectionView').hidden = view !== 'connection';
+  if (panelMode && view === 'chat') for (const item of transferStates.values()) showTransfer(item);
 }
 
 function returnFromSettings() {
@@ -741,7 +807,9 @@ async function request(route, options = {}) {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `请求失败 (${response.status})`);
+    const error = new Error(body.error || `请求失败 (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return response;
 }
@@ -768,7 +836,11 @@ async function openSession(url, key, name, mode) {
     throw error;
   }
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || `连接失败 (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(body.error || `连接失败 (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
@@ -783,24 +855,50 @@ function formatSize(bytes) {
 }
 
 function transferLabel(item) {
-  if (item.phase === 'saved') return '已保存到下载';
-  if (item.phase === 'failed') return item.direction === 'receive' ? '接收失败，点击文件重试' : '发送失败';
+  if (item.phase === 'saved') return item.direction === 'send' ? '对方已保存到下载' : '已保存到下载';
+  if (item.phase === 'cancelled') return '已取消';
+  if (item.phase === 'failed') return item.error || (item.direction === 'receive' ? '接收失败，可重试' : '发送失败，可重试');
   if (item.phase === 'uploaded') return '已发送到房间';
   if (item.phase === 'waiting') return '等待接收';
-  if (item.phase === 'downloading') return `正在保存到下载 · ${Math.round(item.progress)}%`;
+  if (item.phase === 'downloading') return `${item.direction === 'send' ? '对方正在接收' : '正在保存到下载'} · ${Math.round(item.progress)}%`;
   return item.direction === 'receive' ? `正在接收 · ${Math.round(item.progress)}%` : `正在发送 · ${Math.round(item.progress)}%`;
 }
 
 function showTransfer(item) {
-  if (panelKind !== 'chat' || !item?.transferId) return;
+  if (!item?.transferId) return;
   item = { ...item, roomUrl: item.roomUrl || state.url };
   const previous = transferStates.get(item.transferId);
   if (previous?.phase === 'saved' && item.phase !== 'saved') return;
   if (previous?.phase === 'uploaded' && item.phase === 'uploading') return;
   if (previous?.phase === 'downloading' && item.phase === 'uploading') return;
+  if (previous?.phase === 'downloading' && item.phase === 'uploaded') return;
+  if (previous?.fileId && ['failed', 'cancelled'].includes(previous.phase) && item.phase === 'uploaded') return;
+  item = { ...previous, ...item };
   transferStates.set(item.transferId, item);
-  while (transferStates.size > 300) transferStates.delete(transferStates.keys().next().value);
+  while (transferStates.size > 300) {
+    const oldest = transferStates.keys().next().value;
+    transferStates.delete(oldest);
+    transferRows.get(oldest)?.remove(); transferRows.delete(oldest);
+  }
   if (!state.url || item.roomUrl !== state.url) return;
+  if (!panelMode) {
+    const active = item.phase === 'downloading' || item.phase === 'uploading' && (item.direction === 'send' || state.peerOnline)
+      || item.phase === 'uploaded' && state.peerOnline;
+    const wasActive = activeTransferAnimations.has(item.transferId);
+    if (active) {
+      activeTransferAnimations.add(item.transferId);
+      if (!wasActive) { unpeek(true); animateDelivery((item.progress || 0) / 100, true); }
+      $('mainMascot').style.setProperty('--delivery-progress', String((item.progress || 0) / 100));
+    } else {
+      activeTransferAnimations.delete(item.transferId);
+      if (item.phase === 'saved' && item.direction === 'receive' && item.fileId) rememberSavedFile(item.fileId);
+      if (wasActive && activeTransferAnimations.size === 0) {
+        if (item.phase === 'saved') animateReceive();
+        else { ++actionEpoch; transitionPose(state.peerOnline ? 'idle' : 'nap'); scheduleNap(); scheduleIdleAction(); }
+      }
+    }
+  }
+  if (!panelMode || state.view !== 'chat' && panelKind !== 'chat') return;
   let row = transferRows.get(item.transferId);
   if (!row) {
     row = document.createElement('div');
@@ -825,7 +923,17 @@ function showTransfer(item) {
   status.querySelector('span').textContent = transferLabel(item);
   const bar = status.querySelector('progress');
   bar.value = item.progress;
-  bar.hidden = ['saved', 'failed', 'uploaded', 'waiting'].includes(item.phase);
+  bar.hidden = ['saved', 'failed', 'cancelled', 'uploaded', 'waiting'].includes(item.phase);
+  status.querySelector('.transfer-controls')?.remove();
+  const canCancel = item.canCancel && (item.direction === 'send' ? item.phase === 'uploading' : item.phase === 'downloading');
+  const canRetry = ['failed', 'cancelled'].includes(item.phase) && (item.canRetry || item.direction === 'receive' && item.fileId);
+  if (canCancel || canRetry) {
+    const controls = document.createElement('div'); controls.className = 'transfer-controls';
+    const button = document.createElement('button'); button.type = 'button';
+    button.textContent = canCancel ? '取消' : '重试';
+    button.addEventListener('click', () => transferAction(item, canCancel ? 'cancel' : 'retry'));
+    controls.appendChild(button); status.appendChild(controls);
+  }
   $('events').scrollTop = $('events').scrollHeight;
 }
 
@@ -843,12 +951,16 @@ async function downloadFile(event, automatic = false) {
   activeDownloads.add(event.fileId);
   try {
     if (desktop?.saveRemoteFile) {
-      const savedPath = await desktop.saveRemoteFile({
+      const result = await desktop.saveRemoteFile({
         url: state.url, token: state.token, fileId: event.fileId,
         fileName: event.fileName, transferId: event.transferId || event.id
       });
+      if (result.phase !== 'saved') {
+        if (result.phase !== 'cancelled') throw new Error(result.error || '文件下载失败');
+        return false;
+      }
       rememberSavedFile(event.fileId);
-      if (!automatic) toast(`已保存到下载：${savedPath.split(/[\\/]/).pop()}`);
+      if (!automatic) toast(`已保存到下载：${result.savedPath.split(/[\\/]/).pop()}`);
     } else {
       const response = await request(`/files/${encodeURIComponent(event.fileId)}`);
       const data = await response.arrayBuffer();
@@ -884,14 +996,14 @@ function renderEvent(event) {
   wrapper.appendChild(meta);
   if (event.kind === 'file') {
     const transferId = event.transferId || event.id;
-    if (panelKind === 'chat') {
+    if (panelMode) {
       const earlier = transferRows.get(transferId);
       if (earlier) earlier.remove();
       transferRows.set(transferId, wrapper);
     }
     const button = document.createElement('button');
     button.className = 'event-body file-event';
-    button.title = `下载 ${event.fileName}`;
+    button.title = `查看 ${event.fileName}`;
     const icon = document.createElement('img');
     icon.src = './icons/file.svg';
     icon.alt = '';
@@ -900,12 +1012,16 @@ function renderEvent(event) {
     const size = document.createElement('small');
     size.textContent = formatSize(event.size);
     button.append(icon, name, size);
-    button.addEventListener('click', () => {
-      if (event.senderId !== senderId && savedFileIds.has(event.fileId)) desktop?.openDownloads();
+    button.addEventListener('click', async () => {
+      if (event.senderId === senderId) {
+        if (!await desktop?.revealTransfer?.({ url: state.url, transferId })) toast('本次未记录源文件位置');
+        return;
+      }
+      if (savedFileIds.has(event.fileId)) desktop?.openDownloads();
       else downloadFile(event);
     });
     wrapper.appendChild(button);
-    if (panelKind === 'chat') {
+    if (panelMode) {
       const progress = transferStates.get(transferId) || {
         transferId, name: event.fileName, direction: event.senderId === senderId ? 'send' : 'receive',
         phase: event.senderId === senderId ? 'uploaded' : savedFileIds.has(event.fileId) ? 'saved' : 'waiting',
@@ -921,12 +1037,19 @@ function renderEvent(event) {
     wrapper.appendChild(body);
   }
   $('events').appendChild(wrapper);
+  while ($('events').children.length > 300) {
+    const oldest = $('events').firstElementChild;
+    for (const [id, row] of transferRows) if (row === oldest) transferRows.delete(id);
+    oldest.remove();
+  }
   $('events').scrollTop = $('events').scrollHeight;
 }
 
 function onEvent(event) {
+  if (!event || typeof event.id !== 'string') return;
   if (seenEvents.has(event.id)) return;
   seenEvents.add(event.id);
+  while (seenEvents.size > 2000) seenEvents.delete(seenEvents.values().next().value);
   if (event.senderId !== senderId && !panelMode) unpeek(true);
   if (event.kind === 'delivery') {
     const data = event.data || {};
@@ -961,7 +1084,7 @@ function onEvent(event) {
   if (event.senderId !== senderId) {
     const message = event.kind === 'file' ? `收到文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 来打招呼啦` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : event.text;
     speak(message, actionText[event.kind] ? 'alert' : 'normal');
-    if (event.kind === 'file' || event.kind === 'message') {
+    if (event.kind === 'message') {
       const transferId = event.transferId;
       const started = transferId ? pendingDeliveries.get(transferId) : null;
       if (transferId) pendingDeliveries.delete(transferId);
@@ -969,33 +1092,49 @@ function onEvent(event) {
     }
     if (desktop && state.notifications) desktop.notify(state.profile.petName || DEFAULT_PET_NAME, event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
   }
+  if (event.kind === 'message' && event.senderId === senderId) animateDelivery(1);
 }
 
 function openSocket() {
-  if (!state.connected) return;
+  if (!state.connected || !state.token) return;
+  clearTimeout(socketConnectTimer);
+  const epoch = connectionEpoch;
   const socket = new WebSocket(`${state.url.replace(/^http/, 'ws')}/ws?v=3&session=${encodeURIComponent(state.token)}`);
   state.socket = socket;
+  socketConnectTimer = setTimeout(() => {
+    if (state.socket === socket && socket.readyState === WebSocket.CONNECTING) socket.close();
+  }, 6000);
   socket.onopen = async () => {
-    if (!state.connected || state.socket !== socket) return socket.close();
+    if (!state.connected || epoch !== connectionEpoch || state.socket !== socket) return socket.close();
+    clearTimeout(socketConnectTimer);
+    reconnectAttempt = 0;
+    recoveryBlocked = false;
     state.roomConnection = 'online';
     updateConnectionStatus();
     try {
       const response = await request('/events');
-      for (const event of await response.json()) {
+      const events = await response.json();
+      if (!state.connected || epoch !== connectionEpoch || state.socket !== socket) return;
+      for (const event of events) {
         onEvent(event);
         if (event.kind === 'file') receiveFile(event);
       }
+      await loadTransferSnapshot();
     } catch { /* The socket's close handler will retry if the room went away. */ }
   };
   socket.onmessage = message => {
     if (!state.connected || state.socket !== socket) return;
-    const payload = JSON.parse(message.data);
+    let payload;
+    try { payload = JSON.parse(message.data); } catch { return; }
+    if (!payload || typeof payload !== 'object') return;
     if (payload.type === 'event') onEvent(payload.event);
     if (payload.type === 'presence') setPeerOnline(payload);
     if (payload.type === 'profile') applyProfile(payload.profile);
+    if (payload.type === 'transfer') onTransfer(payload.transfer);
   };
   socket.onclose = () => {
     if (!state.connected || state.socket !== socket) return;
+    clearTimeout(socketConnectTimer);
     state.socket = null;
     state.token = '';
     state.roomConnection = 'reconnecting';
@@ -1004,37 +1143,100 @@ function openSocket() {
   };
 }
 
-function scheduleSessionRetry(delay = 2500) {
+function persistSession() {
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ url: state.url, key: state.key, name: state.name, mode: state.mode }));
+}
+
+async function ensureHostStarted(epoch) {
+  if (!hostNeedsStart || !desktop || panelMode || state.mode !== 'host') return;
+  const addresses = await desktop.addresses();
+  if (epoch !== connectionEpoch) return;
+  const previousAddress = new URL(state.url).hostname;
+  const address = addresses.find(item => item.address === previousAddress)?.address || addresses[0]?.address;
+  if (!address) throw new Error('Tailscale 正在等待网络');
+  const result = await desktop.startHost(address, senderId);
+  if (epoch !== connectionEpoch) return;
+  state.hostStarted = true;
+  hostNeedsStart = false;
+  state.url = result.url;
+  state.key = result.key;
+  $('roomAddress').textContent = state.url;
+  $('roomKey').textContent = state.key;
+  if (state.connected) persistSession();
+}
+
+function scheduleSessionRetry(delay) {
   clearTimeout(state.reconnectTimer);
-  if (!state.connected) return;
+  if (!state.connected || recoveryBlocked || retryInFlightEpoch === connectionEpoch) return;
   const epoch = connectionEpoch;
+  const wait = delay ?? window.ConnectionPolicy.retryDelay(reconnectAttempt++);
   state.reconnectTimer = setTimeout(async () => {
     if (!state.connected || epoch !== connectionEpoch) return;
+    retryInFlightEpoch = epoch;
+    let retry = false;
     try {
+      await ensureHostStarted(epoch);
+      if (!state.connected || epoch !== connectionEpoch) return;
       const session = await openSession(state.url, state.key, state.name, state.mode);
       if (!state.connected || epoch !== connectionEpoch) return;
       state.token = session.token;
+      if (!panelMode) desktop?.setTransferSession?.(state.url, state.token);
+      state.roomConnection = 'connecting';
       state.profile = session.profile || {};
       applyProfile(state.profile);
       setPeerOnline(session.presence || false);
       openSocket();
-    } catch {
-      if (state.connected && epoch === connectionEpoch) scheduleSessionRetry(5000);
+    } catch (error) {
+      if (state.connected && epoch === connectionEpoch) {
+        retry = window.ConnectionPolicy.shouldRetry(error);
+        recoveryBlocked = !retry;
+        if (!retry) toast(error.message);
+      }
+    } finally {
+      if (retryInFlightEpoch === epoch) retryInFlightEpoch = null;
+      if (retry && state.connected && epoch === connectionEpoch) scheduleSessionRetry();
     }
-  }, delay);
+  }, wait);
 }
 
-async function connect(url, key, name, mode) {
+function recoverConnection(force = false) {
+  if (!state.connected || recoveryBlocked || retryInFlightEpoch === connectionEpoch) return;
+  if (!force && state.socket?.readyState === WebSocket.OPEN) return;
+  clearTimeout(socketConnectTimer);
+  const socket = state.socket;
+  state.socket = null;
+  socket?.close();
+  state.token = '';
+  state.roomConnection = 'reconnecting';
+  setPeerOnline(false);
+  scheduleSessionRetry(0);
+}
+
+async function connect(url, key, name, mode, { restoreHost = false } = {}) {
+  const normalized = normalizeAddress(url);
   const epoch = ++connectionEpoch;
-  state.url = normalizeAddress(url);
+  clearTimeout(state.reconnectTimer);
+  clearTimeout(socketConnectTimer);
+  const previousSocket = state.socket;
+  state.socket = null;
+  previousSocket?.close();
+  reconnectAttempt = 0;
+  recoveryBlocked = false;
+  offlineNapDeadline = 0;
+  hostNeedsStart = restoreHost && !panelMode;
+  state.url = normalized;
   state.key = key.trim();
   state.name = name.trim().slice(0, 24);
   state.mode = mode;
   let session = null;
-  try { session = await openSession(state.url, state.key, state.name, mode); }
-  catch (error) { if (error.code !== 'ROOM_UNREACHABLE') throw error; }
+  try {
+    await ensureHostStarted(epoch);
+    if (epoch !== connectionEpoch) return;
+    session = await openSession(state.url, state.key, state.name, mode);
+  } catch (error) { if (!window.ConnectionPolicy.shouldRetry(error)) throw error; }
   if (epoch !== connectionEpoch) return;
   state.token = session?.token || '';
+  if (!panelMode && state.token) desktop?.setTransferSession?.(state.url, state.token);
   state.profile = session?.profile || {};
   let events = [];
   if (session) {
@@ -1079,29 +1281,24 @@ async function connect(url, key, name, mode) {
     setExpanded(!desktop);
   }
   updateConnectionStatus();
-  setPose('idle');
-  scheduleNap();
-  clearInterval(blinkTimer);
-  blinkTimer = setInterval(() => {
-    if (!state.connected || state.walking || state.pose !== 'idle') return;
-    setPose('blink');
-    setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, catAnimator?.durationFor('blink') || 170);
-  }, 6800);
-  scheduleIdleAction();
-  schedulePeek();
+  startCatActivity();
   if (session) openSocket();
   else scheduleSessionRetry();
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ url: state.url, key: state.key, name: state.name, mode }));
+  persistSession();
 }
 
 async function disconnect() {
   if (!state.connected) return;
   ++connectionEpoch;
   state.connected = false;
-  try { if (state.token) await request('/leave', { method: 'POST' }); } catch { /* Room may already be gone. */ }
+  const roomUrl = state.url;
+  // Capture credentials before clearing them. Leaving an unavailable room must
+  // never hold the desktop UI open while a network request times out.
+  if (state.token) request('/leave', { method: 'POST', signal: AbortSignal.timeout(2000) }).catch(() => {});
+  cancelRoomTransfers(roomUrl);
   state.roomConnection = 'closed';
-  if (state.walking) await desktop?.stopWalk();
-  if (state.jumping) await desktop?.stopJump();
+  if (!panelMode && state.walking) desktop?.stopWalk();
+  if (!panelMode && state.jumping) desktop?.stopJump();
   clearInterval(walkFrameTimer);
   clearTimeout(poseTimer);
   clearTimeout(napTimer);
@@ -1117,11 +1314,16 @@ async function disconnect() {
   setQuickComposer(false);
   setActionTray(false);
   clearTimeout(state.reconnectTimer);
-  state.socket?.close();
+  clearTimeout(socketConnectTimer);
+  const socket = state.socket;
   state.socket = null;
+  socket?.close();
   state.token = '';
-  if (state.hostStarted && desktop && !panelMode) await desktop.stopHost();
+  if ((state.hostStarted || hostNeedsStart) && desktop && !panelMode) desktop.stopHost().catch(() => {});
   state.hostStarted = false;
+  hostNeedsStart = false;
+  recoveryBlocked = false;
+  offlineNapDeadline = 0;
   localStorage.removeItem(SESSION_KEY);
   $('companion').hidden = true;
   $('setup').hidden = false;
@@ -1186,48 +1388,47 @@ async function submitMessage(form, input) {
 async function sendFile(file) {
   if (!file) return;
   if (file.size > 100 * 1024 * 1024) return toast('文件不能超过 100 MB');
-  const transferId = crypto.randomUUID();
-  const form = new FormData();
-  form.append('file', file);
-  form.append('senderId', senderId);
-  form.append('senderName', state.name);
-  form.append('fileName', file.name);
-  form.append('clientId', crypto.randomUUID());
-  form.append('transferId', transferId);
-  speak(`叼着 ${file.name} 送过去…`);
-  desktop?.reportTransfer?.({ transferId, name: file.name, roomUrl: state.url, direction: 'send', phase: 'uploading', progress: 0 });
-  animateDelivery(0);
-  await sendEvent('delivery', '', { transferId, name: file.name, progress: 0, status: 'preparing', type: 'file' }, { quiet: true, signal: AbortSignal.timeout(1500) });
+  if (!state.connected || !state.token) return toast('房间恢复连接后再发送文件');
+  if (!desktop?.uploadFile) return toast('请在桌面应用中发送文件');
   try {
-    const event = await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      let lastProgress = -1;
-      xhr.open('POST', `${state.url}/api/files`);
-      xhr.setRequestHeader('X-Pet-Session', state.token);
-      xhr.upload.onprogress = progress => {
-        if (!progress.lengthComputable) return;
-        const ratio = progress.loaded / progress.total;
-        if (ratio < 1 && ratio - lastProgress < 0.1) return;
-        lastProgress = ratio;
-        const progressValue = Math.round(ratio * 100);
-        desktop?.reportTransfer?.({ transferId, name: file.name, roomUrl: state.url, direction: 'send', phase: 'uploading', progress: progressValue });
-        sendEvent('delivery', '', { transferId, name: file.name, progress: progressValue, status: 'uploading', type: 'file' }, { quiet: true });
-      };
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText));
-        else reject(new Error('文件发送失败'));
-      };
-      xhr.onerror = () => reject(new Error('文件发送失败'));
-      xhr.send(form);
-    });
-    speak(`${event.fileName} 已送到窗口`);
-    desktop?.reportTransfer?.({ transferId, fileId: event.fileId, name: event.fileName, roomUrl: state.url, direction: 'send', phase: 'uploaded', progress: 100 });
-  } catch (error) {
-    desktop?.reportTransfer?.({ transferId, name: file.name, roomUrl: state.url, direction: 'send', phase: 'failed', progress: 0 });
-    toast(error.message);
-    speak('发送失败', 'alert');
-  }
+    const transfer = await desktop.uploadFile(file, { url: state.url, token: state.token,
+      transferId: crypto.randomUUID(), clientId: crypto.randomUUID() });
+    showTransfer(transfer);
+  } catch (error) { toast(error.message); }
   $('fileInput').value = '';
+}
+
+function cancelRoomTransfers(url) {
+  activeTransferAnimations.clear();
+  pendingDeliveries.clear();
+  desktop?.cancelRoomTransfers?.(url);
+}
+
+async function transferAction(item, action) {
+  try {
+    const details = { url: state.url, token: state.token, transferId: item.transferId };
+    if (action === 'cancel') await desktop.cancelTransfer(details);
+    else if (item.canRetry) showTransfer(await desktop.retryTransfer(details));
+    else if (item.fileId && item.direction === 'receive') await downloadFile({ fileId: item.fileId, fileName: item.name, transferId: item.transferId, id: item.transferId });
+  } catch (error) { toast(error.message); }
+}
+
+async function loadTransferSnapshot() {
+  const url = state.url;
+  const response = await request('/transfers');
+  const items = await response.json();
+  if (!state.connected || state.url !== url) return;
+  for (const item of items) onTransfer(item);
+}
+
+function onTransfer(item) {
+  if (!item || typeof item.transferId !== 'string') return;
+  if (item.senderId !== senderId && item.fileId && savedFileIds.has(item.fileId)) {
+    if (item.phase !== 'saved' && !panelMode) request('/transfers', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transferId: item.transferId, fileId: item.fileId, phase: 'saved', progress: 100 }) }).catch(() => {});
+    item = { ...item, phase: 'saved', progress: 100 };
+  }
+  showTransfer({ ...item, roomUrl: state.url, direction: item.senderId === senderId ? 'send' : 'receive' });
 }
 
 async function copy(value) {
@@ -1237,6 +1438,10 @@ async function copy(value) {
 }
 
 async function init() {
+  window.addEventListener('online', () => recoverConnection(true));
+  window.addEventListener('focus', () => recoverConnection());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) recoverConnection(); });
+  desktop?.onResume?.(() => recoverConnection(true));
   if (desktop?.onTransferProgress) {
     desktop.onTransferProgress(showTransfer);
     desktop.transferSnapshot().then(items => items.forEach(showTransfer)).catch(() => {});
@@ -1273,6 +1478,7 @@ async function init() {
       return;
     }
     if (state.connected) { setExpanded(true); setView('connection'); return; }
+    placePreferences();
     $('setup').hidden = true;
     $('appSettings').hidden = false;
     desktop?.setWindowSize(true);
@@ -1307,6 +1513,12 @@ async function init() {
       for (const fileId of JSON.parse(event.newValue || '[]')) savedFileIds.add(fileId);
     }
     if (event.key === SESSION_KEY && !event.newValue && state.connected) disconnect();
+    if (event.key === SESSION_KEY && event.newValue && panelMode) {
+      const saved = JSON.parse(event.newValue);
+      if (saved.url !== state.url || saved.key !== state.key) {
+        connect(saved.url, saved.key, saved.name, saved.mode).catch(error => toast(error.message));
+      }
+    }
   });
   $('desktopNotificationsToggle').addEventListener('change', event => {
     state.notifications = event.target.checked;
@@ -1407,13 +1619,13 @@ async function init() {
     setActionTray(false);
     triggerAction(button.dataset.action);
   }));
-  if (desktop) desktop.onWalkState(onWalkState);
-  if (desktop?.onWalkDirection) desktop.onWalkDirection(direction => {
+  if (!panelMode && desktop) desktop.onWalkState(onWalkState);
+  if (!panelMode && desktop?.onWalkDirection) desktop.onWalkDirection(direction => {
     $('mainMascot').classList.toggle('walk-left', direction < 0);
     $('mainMascot').classList.toggle('walk-right', direction > 0);
   });
-  if (desktop?.onJumpState) desktop.onJumpState(onJumpState);
-  if (desktop?.onPeekState) desktop.onPeekState(peeked => {
+  if (!panelMode && desktop?.onJumpState) desktop.onJumpState(onJumpState);
+  if (!panelMode && desktop?.onPeekState) desktop.onPeekState(peeked => {
     state.peeked = Boolean(peeked);
     $('window').classList.toggle('peeked', state.peeked);
   });
@@ -1517,10 +1729,8 @@ async function init() {
         toast(error.message);
       }
     };
-    $('autoLaunchToggle').addEventListener('change', updateAutoLaunch);
     $('autoLaunchSetup').addEventListener('change', updateAutoLaunch);
   } else {
-    $('autoLaunchToggle').disabled = true;
     $('autoLaunchSetup').disabled = true;
   }
 
@@ -1534,13 +1744,8 @@ async function init() {
     $('joinKey').value = saved.key;
     setMode(saved.mode);
     try {
-      if (saved.mode === 'host' && desktop && !panelMode) {
-        const address = new URL(saved.url).hostname;
-        const result = await desktop.startHost(address, senderId);
-        state.hostStarted = true;
-        await connect(result.url, result.key, saved.name, 'host');
-      } else await connect(saved.url, saved.key, saved.name, saved.mode);
-    } catch { $('setupFeedback').textContent = '上次的房间暂时无法连接，请重新尝试'; }
+      await connect(saved.url, saved.key, saved.name, saved.mode, { restoreHost: saved.mode === 'host' && Boolean(desktop) && !panelMode });
+    } catch (error) { $('setupFeedback').textContent = error.message; }
   }
 }
 

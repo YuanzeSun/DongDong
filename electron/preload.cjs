@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const panelArgument = process.argv.find(value => value.startsWith('--dongdong-panel='));
 const panelKind = panelArgument?.slice('--dongdong-panel='.length) || new URLSearchParams(globalThis.location?.search || '').get('panel') || '';
 let motionId = 0;
@@ -31,9 +31,15 @@ contextBridge.exposeInMainWorld('petDesktop', {
   copy: value => ipcRenderer.invoke('copy', value),
   saveDownload: (data, name) => ipcRenderer.invoke('save-download', data, name),
   saveRemoteFile: details => ipcRenderer.invoke('save-remote-file', details),
-  reportTransfer: details => ipcRenderer.send('report-transfer', details),
+  uploadFile: (file, details) => ipcRenderer.invoke('upload-file', { ...details, path: webUtils.getPathForFile(file), fileName: file.name }),
+  retryTransfer: details => ipcRenderer.invoke('retry-transfer', details),
+  cancelTransfer: details => ipcRenderer.invoke('cancel-transfer', details),
+  cancelRoomTransfers: url => ipcRenderer.invoke('cancel-room-transfers', url),
+  setTransferSession: (url, token) => ipcRenderer.invoke('transfer-session', url, token),
+  revealTransfer: details => ipcRenderer.invoke('reveal-transfer', details),
   transferSnapshot: () => ipcRenderer.invoke('transfer-snapshot'),
   onTransferProgress: callback => ipcRenderer.on('transfer-progress', (_event, details) => callback(details)),
+  onResume: callback => ipcRenderer.on('system-resume', callback),
   getDownloadsPath: () => ipcRenderer.invoke('get-downloads-path'),
   revealDownload: savedPath => ipcRenderer.invoke('reveal-download', savedPath),
   openDownloads: () => ipcRenderer.invoke('open-downloads'),

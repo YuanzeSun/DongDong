@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Notification, Tray, clipboard, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Notification, Tray, clipboard, screen, shell, powerMonitor } = require('electron');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -6,7 +6,8 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { createRoom } = require('../server/room.cjs');
-const { downloadBuffer, saveUniqueDownload, saveResponseDownload, clampBounds, planWalkPath, tailnetPeers } = require('./native-helpers.cjs');
+const { downloadBuffer, saveUniqueDownload, clampBounds, planWalkPath, tailnetPeers } = require('./native-helpers.cjs');
+const { createTransferManager } = require('./transfer-manager.cjs');
 
 const PORT = 4827;
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
@@ -46,8 +47,8 @@ else {
   // a panel must never hide the mascot, and closing the mascot must not tear down a panel.
   const panelWindows = new Map();
   const savedDownloads = new Set(); const menuListeners = new Set();
-  const transfers = new Map();
-  const activeRemoteDownloads = new Map();
+  const ownsCat = event => window && !window.isDestroyed() && event.sender === window.webContents;
+  const transferManager = createTransferManager({ downloadsPath, onProgress: reportTransfer });
   function reportTransfer(details) {
     if (!details || typeof details.transferId !== 'string' || !details.transferId || details.transferId.length > 120) return;
     const item = {
@@ -59,21 +60,14 @@ else {
       phase: String(details.phase || '').slice(0, 32),
       progress: Math.max(0, Math.min(100, Number(details.progress) || 0)),
       savedPath: String(details.savedPath || '').slice(0, 1024),
+      canCancel: Boolean(details.canCancel), canRetry: Boolean(details.canRetry), error: String(details.error || '').slice(0, 180),
       updatedAt: Date.now()
     };
-    transfers.set(item.transferId, item);
-    while (transfers.size > 300) transfers.delete(transfers.keys().next().value);
-    for (const panel of panelWindows.values()) if (!panel.isDestroyed()) panel.webContents.send('transfer-progress', item);
-  }
-  function remoteFileUrl(origin, fileId) {
-    const url = new URL(String(origin || ''));
-    const octets = url.hostname.split('.').map(Number);
-    const tailnet = octets.length === 4 && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127
-      && octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255);
-    if (url.protocol !== 'http:' || !tailnet && !['127.0.0.1', 'localhost'].includes(url.hostname)
-      || url.username || url.password || url.pathname !== '/' || url.search || url.hash
-      || !/^[0-9a-f-]{36}$/i.test(fileId)) throw new Error('文件地址无效');
-    return `${url.origin}/api/files/${fileId}`;
+    if (item.savedPath) {
+      savedDownloads.add(path.resolve(item.savedPath));
+      while (savedDownloads.size > 300) savedDownloads.delete(savedDownloads.values().next().value);
+    }
+    for (const panel of [window, ...panelWindows.values()]) if (panel && !panel.isDestroyed()) panel.webContents.send('transfer-progress', item);
   }
   const sendMenuAction = action => { for (const listener of menuListeners) listener(action); };
   function stopWalk() {
@@ -256,11 +250,29 @@ else {
   app.whenReady().then(() => {
     initializeAutoLaunch();
     ipcMain.handle('addresses', () => tailscaleAddresses());
-    ipcMain.handle('start-host', async (_event, requestedAddress, senderId) => { const address = tailscaleAddresses().find(item => item.address === requestedAddress)?.address; if (!address) throw new Error('没有找到这个 Tailscale 地址，请确认 Tailscale 已连接'); if (room) await room.close(); room = createRoom({ host: address, port: PORT, key: getKey(), hostId: String(senderId || ''), dataDir: path.join(app.getPath('userData'), 'room-v3'), staticDir: path.join(__dirname, '..', 'public') }); try { await room.listen(); } catch (error) { room = null; throw error; } return { url: `http://${address}:${PORT}`, key: getKey() }; });
-    ipcMain.handle('stop-host', async () => { if (room) await room.close(); room = null; });
-    ipcMain.handle('window-size', (_event, expanded) => { if (!window || window.isDestroyed()) return; if (expanded) { stopWalk(); stopJump(); } if (peeked) setPeeked(false); const [width, height] = expanded ? [420, 700] : [300, 340]; const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea; window.setBounds(clampBounds({ x: bounds.x + bounds.width - width, y: bounds.y + bounds.height - height, width, height }, area)); });
-    ipcMain.on('move-window', (_event, dx, dy) => {
-      if (!window || window.isDestroyed()) return;
+    let hostOperation = Promise.resolve();
+    ipcMain.handle('start-host', (event, requestedAddress, senderId) => {
+      if (!ownsCat(event)) throw new Error('房间由桌宠主窗口管理');
+      const start = async () => {
+        const address = tailscaleAddresses().find(item => item.address === requestedAddress)?.address;
+        if (!address) throw new Error('没有找到这个 Tailscale 地址，请确认 Tailscale 已连接');
+        if (room?.server.listening && room.server.address()?.address === address) return { url: `http://${address}:${PORT}`, key: getKey() };
+        if (room) await room.close();
+        room = createRoom({ host: address, port: PORT, key: getKey(), hostId: String(senderId || ''), dataDir: path.join(app.getPath('userData'), 'room-v3'), staticDir: path.join(__dirname, '..', 'public') });
+        try { await room.listen(); } catch (error) { room = null; throw error; }
+        return { url: `http://${address}:${PORT}`, key: getKey() };
+      };
+      hostOperation = hostOperation.catch(() => {}).then(start);
+      return hostOperation;
+    });
+    ipcMain.handle('stop-host', event => {
+      if (!ownsCat(event)) return;
+      hostOperation = hostOperation.catch(() => {}).then(async () => { if (room) await room.close(); room = null; });
+      return hostOperation;
+    });
+    ipcMain.handle('window-size', (event, expanded) => { if (!ownsCat(event)) return; if (expanded) { stopWalk(); stopJump(); } if (peeked) setPeeked(false); const [width, height] = expanded ? [420, 700] : [300, 340]; const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea; window.setBounds(clampBounds({ x: bounds.x + bounds.width - width, y: bounds.y + bounds.height - height, width, height }, area)); });
+    ipcMain.on('move-window', (event, dx, dy) => {
+      if (!ownsCat(event)) return;
       const deltaX = Number(dx); const deltaY = Number(dy);
       if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
       if (walkTimer) stopWalk();
@@ -271,9 +283,13 @@ else {
       const clamped = clampBounds(next, area);
       if (next.x !== clamped.x || next.y !== clamped.y) window.setPosition(clamped.x, clamped.y, false);
     });
-    ipcMain.handle('set-pin', (_event, pinned) => window?.setAlwaysOnTop(Boolean(pinned))); ipcMain.handle('start-walk', (_event, motionId) => startWalk(motionId)); ipcMain.handle('stop-walk', () => stopWalk()); ipcMain.handle('start-jump', (_event, motionId) => startJump(motionId)); ipcMain.handle('stop-jump', () => stopJump());
+    ipcMain.handle('set-pin', (event, pinned) => ownsCat(event) && window.setAlwaysOnTop(Boolean(pinned)));
+    ipcMain.handle('start-walk', (event, motionId) => ownsCat(event) && startWalk(motionId));
+    ipcMain.handle('stop-walk', event => { if (ownsCat(event)) stopWalk(); });
+    ipcMain.handle('start-jump', (event, motionId) => ownsCat(event) && startJump(motionId));
+    ipcMain.handle('stop-jump', event => { if (ownsCat(event)) stopJump(); });
     ipcMain.handle('scan-peers', () => scanTailnetPeers());
-    ipcMain.handle('set-online', (_event, online) => { isOnline = Boolean(online); if (!isOnline) { stopWalk(); stopJump(); } return isOnline; });
+    ipcMain.handle('set-online', (event, online) => { if (!ownsCat(event)) return; isOnline = Boolean(online); if (!isOnline) { stopWalk(); stopJump(); } return isOnline; });
     ipcMain.handle('set-ignore-mouse-events', (event, ignore) => {
       if (!window || window.isDestroyed() || event.sender !== window.webContents) return false;
       const next = Boolean(ignore);
@@ -283,44 +299,22 @@ else {
       }
       return ignoringMouse;
     });
-    ipcMain.handle('set-peeked', (_event, next) => setPeeked(next));
+    ipcMain.handle('set-peeked', (event, next) => ownsCat(event) && setPeeked(next));
     ipcMain.handle('open-panel', (_event, kind) => openPanel(kind));
     ipcMain.handle('close-panel', event => closePanel(event.sender));
     ipcMain.handle('copy', (_event, value) => clipboard.writeText(String(value).slice(0, 500))); ipcMain.handle('get-downloads-path', downloadsPath);
     ipcMain.handle('save-download', async (_event, data, requestedName) => { const savedPath = await saveUniqueDownload(downloadsPath(), downloadBuffer(data, MAX_DOWNLOAD_BYTES), requestedName); savedDownloads.add(path.resolve(savedPath)); return savedPath; });
-    ipcMain.on('report-transfer', (_event, details) => reportTransfer(details));
-    ipcMain.handle('transfer-snapshot', () => [...transfers.values()]);
-    ipcMain.handle('save-remote-file', (_event, details = {}) => {
-      const fileId = String(details.fileId || '');
-      const url = remoteFileUrl(details.url, fileId);
-      const token = String(details.token || '');
-      if (!token || token.length > 200) throw new Error('文件会话无效');
-      if (activeRemoteDownloads.has(fileId)) return activeRemoteDownloads.get(fileId);
-      const transferId = String(details.transferId || fileId);
-      const name = String(details.fileName || 'file');
-      const report = (phase, progress, savedPath = '') => reportTransfer({ transferId, fileId, name, roomUrl: details.url, direction: 'receive', phase, progress, savedPath });
-      const download = (async () => {
-        report('downloading', 0);
-        try {
-          const response = await fetch(url, { headers: { 'X-Pet-Session': token }, signal: AbortSignal.timeout(120000) });
-          if (!response.ok) throw new Error(`文件下载失败 (${response.status})`);
-          let lastReport = 0;
-          const savedPath = await saveResponseDownload(downloadsPath(), response, name, MAX_DOWNLOAD_BYTES, (received, total) => {
-            const now = Date.now();
-            if (now - lastReport < 120 && received !== total) return;
-            lastReport = now;
-            report('downloading', total ? received / total * 100 : 0);
-          });
-          savedDownloads.add(path.resolve(savedPath));
-          report('saved', 100, savedPath);
-          return savedPath;
-        } catch (error) {
-          report('failed', 0);
-          throw error;
-        } finally { activeRemoteDownloads.delete(fileId); }
-      })();
-      activeRemoteDownloads.set(fileId, download);
-      return download;
+    ipcMain.handle('transfer-snapshot', () => transferManager.snapshot());
+    ipcMain.handle('upload-file', (_event, details) => transferManager.upload(details));
+    ipcMain.handle('save-remote-file', (_event, details) => transferManager.download(details));
+    ipcMain.handle('retry-transfer', (_event, details) => transferManager.retry(details));
+    ipcMain.handle('cancel-transfer', (_event, details) => transferManager.cancel(details));
+    ipcMain.handle('cancel-room-transfers', (_event, url) => transferManager.cancelRoom(url));
+    ipcMain.handle('transfer-session', (event, url, token) => { if (ownsCat(event)) transferManager.updateSession(url, token); });
+    ipcMain.handle('reveal-transfer', (_event, details) => {
+      const localPath = transferManager.localPath(details);
+      if (!localPath || !fs.existsSync(localPath)) return false;
+      shell.showItemInFolder(localPath); return true;
     });
     ipcMain.handle('reveal-download', async (_event, requestedPath) => { const resolved = path.resolve(String(requestedPath || '')); if (!savedDownloads.has(resolved)) throw new Error('只能打开本次保存的文件'); await shell.showItemInFolder(resolved); return true; }); ipcMain.handle('open-downloads', () => shell.openPath(downloadsPath()));
     ipcMain.handle('get-auto-launch', () => app.getLoginItemSettings().openAtLogin); ipcMain.handle('set-auto-launch', (_event, enabled) => { app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true }); saveAutoLaunchPreference(enabled); return app.getLoginItemSettings().openAtLogin; });
@@ -328,5 +322,6 @@ else {
     ipcMain.handle('on-menu-action', event => { const listener = action => event.sender.send('menu-action', action); menuListeners.add(listener); event.sender.once('destroyed', () => menuListeners.delete(listener)); return true; });
     createTray(); createWindow();
   });
-  app.on('activate', showWindow); app.on('before-quit', () => { isQuitting = true; stopWalk(); stopJump(); }); app.on('window-all-closed', event => { if (!isQuitting && process.platform !== 'darwin') event.preventDefault(); });
+  powerMonitor.on('resume', () => { for (const view of [window, ...panelWindows.values()]) if (view && !view.isDestroyed()) view.webContents.send('system-resume'); });
+  app.on('activate', showWindow); app.on('before-quit', () => { isQuitting = true; transferManager.close(); stopWalk(); stopJump(); }); app.on('window-all-closed', event => { if (!isQuitting && process.platform !== 'darwin') event.preventDefault(); });
 }

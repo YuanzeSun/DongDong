@@ -129,7 +129,13 @@
 .view-back-button:hover { background:#e5f4ec; color:#b85446; }
 .view-back-button img { width:15px; height:15px; }
 .settings-intro { margin: 0 0 22px; color: #789185; font-size: 12px; }
-.app-settings .setting-row { margin-top: 0; border-top: 0; border-bottom: 1px solid #e6eee9; }
+.preference-settings .setting-row { margin-top: 0; border-top: 0; border-bottom: 1px solid #e6eee9; }
+.preference-settings .setting-row:last-child { border-bottom: 0; }
+.preference-settings .setting-row input { flex: 0 0 36px; }
+.preference-settings .settings-intro { margin-bottom: 6px; }
+.app-settings .preference-settings > .settings-title { display: none; }
+.connection-view .room-settings { margin-top: 24px; padding-top: 20px; border-top: 1px solid #dce8e0; }
+.connection-view .preference-settings { padding-top: 2px; }
 .app-settings .text-button { margin-top: 22px; }
 .action-tray { position: absolute; left: 7px; right: 7px; bottom: 57px; z-index: 8; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 8px; background: #fbfffcf5; border: 1px solid #dbe8df; border-radius: 8px; box-shadow: 0 8px 22px #2048312b; }
 .action-choice { min-width: 0; height: 43px; padding: 3px 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; border-radius: 5px; background: #edf7f1; color: #3c6756; font-size: 10px; font-weight: 700; }
@@ -154,6 +160,7 @@
 .transfer-status progress { width: 100%; height: 5px; border: 0; border-radius: 3px; overflow: hidden; appearance: none; }
 .transfer-status progress::-webkit-progress-bar { background: #dce9e0; }
 .transfer-status progress::-webkit-progress-value { background: #3aab82; }
+.transfer-controls button { border: 1px solid #b9d8c8; border-radius: 5px; padding: 3px 10px; background: #f6fbf8; color: #397461; font-size: 11px; }
 .transfer-event .event-body { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-choice span { font-size: 15px; line-height: 17px; }
 .action-choice img { width: 16px; height: 16px; }
