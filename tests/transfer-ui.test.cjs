@@ -230,7 +230,16 @@ test('a late local upload completion cannot erase the recipient download failure
   page.show({ phase: 'failed', fileId: 'saved-file', progress: 45, error: '传输超时，可重试' });
   page.show({ phase: 'uploaded', fileId: 'saved-file', progress: 100, canCancel: false, canRetry: false });
   const row = page.elements.get('events').children[0];
-  assert.equal(row.querySelector('span').textContent, '传输超时，可重试');
+  assert.equal(row.querySelector('span').textContent, '对方接收失败，可重新选择文件发送');
+});
+
+test('an uploaded file offers retry to its receiver, not its sender', () => {
+  for (const direction of ['send', 'receive']) {
+    const page = renderer('chat');
+    page.show({ direction, fileId: 'uploaded-file', phase: 'failed', canRetry: true });
+    const row = page.elements.get('events').children[0];
+    assert.equal(row.querySelector('button')?.textContent, direction === 'receive' ? '重试' : undefined);
+  }
 });
 
 test('switching from settings to history shows transfers completed while settings were open', () => {
@@ -276,6 +285,80 @@ for (const kind of ['walk', 'jump']) {
     assert.equal(page.animator.action, 'idle');
   });
 }
+
+function edgeWalkRenderer({ pending = false, refused = false } = {}) {
+  const page = renderer();
+  const listeners = new Map();
+  let motionId;
+  let resolveStart;
+  const emit = moving => listeners.get('walk-state')?.({}, moving, motionId);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../electron/preload.cjs'), 'utf8'), {
+    process: { argv: [] }, URLSearchParams,
+    require: () => ({
+      contextBridge: { exposeInMainWorld: (_name, api) => Object.assign(page.context.window.petDesktop, api) },
+      ipcRenderer: {
+        on: (channel, listener) => listeners.set(channel, listener),
+        invoke(channel, id) {
+          page.calls.push({ action: channel });
+          if (channel === 'start-walk') {
+            motionId = id;
+            if (pending) return new Promise(resolve => { resolveStart = resolve; });
+            if (!refused) emit(true);
+            return Promise.resolve(!refused);
+          }
+          if (channel === 'stop-walk') emit(false);
+          return Promise.resolve();
+        }
+      }
+    })
+  });
+  page.run(`desktop.onWalkState(walking => onMotionState('walk', walking));
+    Math.random = () => 0;
+    state.edgeHideEnabled = true; state.peeked = true;
+    schedulePeekOuting();`);
+  page.advance(90000);
+  return { ...page, finishStart() { emit(true); resolveStart(true); } };
+}
+
+test('hover stops an edge outing even when preload filters its native stop event', async () => {
+  const page = edgeWalkRenderer();
+  await new Promise(setImmediate);
+  assert.equal(page.run('state.walking'), true);
+  assert.equal(page.run('state.pose'), 'walk');
+  page.elements.get('mainMascot').classList.add('walk-left');
+  page.run('unpeek(true)');
+  assert.ok(page.calls.some(call => call.action === 'stop-walk'));
+  assert.equal(page.run('state.walking'), false);
+  assert.equal(page.run('state.pose'), 'idle');
+  assert.equal(page.elements.get('mainMascot').classList.contains('walk-left'), false);
+  page.advance(28000);
+  assert.equal(page.run('state.pose'), 'blink', 'Idle activity should resume after the walk stops');
+  page.advance(152000);
+  assert.equal(page.run('state.edgeHold'), false);
+  page.advance(70000);
+  assert.equal(page.run('state.peeked'), true, 'The cat should dock again after its interaction hold expires');
+});
+
+test('hover cancels a pending edge walk without accepting its delayed start event', async () => {
+  const page = edgeWalkRenderer({ pending: true });
+  assert.equal(page.run('motionPendingKind'), 'walk');
+  page.run('unpeek(true)');
+  page.finishStart();
+  await new Promise(setImmediate);
+  assert.ok(page.calls.some(call => call.action === 'stop-walk'));
+  assert.equal(page.run('motionPendingKind'), null);
+  assert.equal(page.run('state.walking'), false);
+  assert.equal(page.run('state.pose'), 'idle');
+  assert.equal(page.run('state.edgeAutoOuting'), false);
+});
+
+test('an edge walk refused by the native window returns to the side', async () => {
+  const page = edgeWalkRenderer({ refused: true });
+  await new Promise(setImmediate);
+  assert.equal(page.run('motionPendingKind'), null);
+  assert.equal(page.run('state.edgeAutoOuting'), false);
+  assert.equal(page.run('state.peeked'), true);
+});
 
 test('petting during a file transfer returns to holding the file until it finishes', () => {
   const page = renderer();

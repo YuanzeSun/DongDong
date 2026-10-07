@@ -10,9 +10,10 @@ function renderer(panelKind = '') {
   const timers = new Map();
   const storage = new Map();
   const sockets = [];
+  const listeners = new Map();
   let nextTimer = 1;
-  const environment = { addresses: [], starts: 0, stops: 0 };
-  const element = () => ({ hidden: false, value: '', dataset: {}, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, replaceChildren() {}, setAttribute() {} });
+  const environment = { addresses: [], starts: 0, stops: 0, panelsClosed: 0 };
+  const element = () => ({ hidden: false, value: '', dataset: {}, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, replaceChildren() {}, setAttribute() {}, addEventListener() {}, querySelector: element });
   class Socket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -20,17 +21,18 @@ function renderer(panelKind = '') {
     close() { this.readyState = 3; this.onclose?.(); }
   }
   const context = vm.createContext({
-    window: { ConnectionPolicy, petDesktop: {
+    window: { ConnectionPolicy, addEventListener: (type, listener) => listeners.set(type, listener), petDesktop: {
       panelKind,
       addresses: async () => environment.addresses,
       startHost: async address => { environment.starts++; return { url: `http://${address}:4827` }; },
       stopHost: async () => { environment.stops++; },
-      setOnline() {}, setWindowSize() {}, closePanel() {}
+      setOnline() {}, setWindowSize() {}, closePanel() { environment.panelsClosed++; },
+      onMenuAction() {}, onWalkState() {}, getAutoLaunch: async () => true
     } },
-    document: { body: { classList: { add() {} } }, createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } },
+    document: { body: { classList: { add() {} } }, addEventListener() {}, querySelectorAll: () => [], createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     crypto: { randomUUID: () => 'recovery-test' },
-    URL, AbortSignal, WebSocket: Socket,
+    URL, URLSearchParams, location: { search: '' }, AbortSignal, WebSocket: Socket,
     fetch: async url => ({ ok: true, json: async () => url.endsWith('/session') ? { token: 'fresh-token', presence: { online: true } } : [] }),
     setTimeout(fn, delay) { const id = nextTimer++; timers.set(id, { fn, delay }); return id; },
     clearTimeout: id => timers.delete(id), setInterval() {}, clearInterval() {}
@@ -43,7 +45,7 @@ function renderer(panelKind = '') {
   run(`setView = setExpanded = startCatActivity = setQuickComposer = setActionTray = applyProfile = () => {};
     transitionPose = () => {}; scheduleIdleAction = () => {}; loadTransferSnapshot = async () => {};
     cancelRoomTransfers = () => {};`);
-  return { context, run, elements, timers, sockets, environment, storage, async retry() {
+  return { context, run, elements, timers, sockets, environment, storage, listeners, async retry() {
     const id = run('state.reconnectTimer');
     const timer = timers.get(id);
     assert.ok(timer, 'expected a scheduled recovery attempt');
@@ -106,6 +108,42 @@ test('an auxiliary settings window never starts the host during session restorat
   assert.equal(page.environment.starts, 0);
   assert.equal(page.run('state.hostStarted'), false);
   assert.equal(page.sockets.length, 1);
+  assert.equal(page.storage.has(page.run('SESSION_KEY')), false);
+});
+
+for (const panelKind of ['settings', 'chat']) {
+  test(`closing the room invalidates a ${panelKind} window's initial session request`, async () => {
+    const page = renderer(panelKind);
+    await page.run('init()');
+    const key = page.run('SESSION_KEY');
+    page.storage.set(key, JSON.stringify({ url: 'http://100.80.0.1:4827', name: '我', mode: 'join' }));
+    let finishSession;
+    page.context.fetch = () => new Promise(resolve => { finishSession = resolve; });
+    const pending = page.run(`connect('100.80.0.1:4827', '我', 'join')`);
+    await Promise.resolve();
+    assert.equal(page.run('state.connected'), false);
+    page.storage.delete(key);
+    page.listeners.get('storage')({ key, newValue: null });
+    assert.equal(page.environment.panelsClosed, 1);
+    finishSession({ ok: true, json: async () => ({ token: 'late-token' }) });
+    await pending;
+    assert.equal(page.run('state.connected'), false);
+    assert.equal(page.run('state.roomConnection'), 'closed');
+    assert.equal(page.storage.has(key), false);
+    assert.equal(page.sockets.length, 0);
+    assert.equal(page.timers.size, 0);
+  });
+}
+
+test('leaving through settings still removes the shared session', async () => {
+  const page = renderer('settings');
+  const key = page.run('SESSION_KEY');
+  page.storage.set(key, JSON.stringify({ url: 'http://100.80.0.1:4827', name: '我', mode: 'join' }));
+  await page.run(`connect('100.80.0.1:4827', '我', 'join')`);
+  await page.run('disconnect()');
+  assert.equal(page.storage.has(key), false);
+  assert.equal(page.environment.panelsClosed, 1);
+  assert.equal(page.run('state.connected'), false);
 });
 
 test('resume promptly replaces a stale open socket without waiting for its TCP timeout', async () => {

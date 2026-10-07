@@ -73,8 +73,9 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
   const publicJob = job => ({ transferId: job.transferId, fileId: job.fileId || '', name: job.name,
     roomUrl: job.roomUrl, direction: job.direction, phase: job.phase, progress: job.progress || 0,
     savedPath: job.savedPath || '', error: job.error || '', updatedAt: job.updatedAt,
-    canCancel: Boolean(job.controller) || isPendingSend(job),
-    canRetry: !job.controller && !job.pendingReceipt && ['failed', 'cancelled'].includes(job.phase) });
+    canCancel: !terminalPhases.has(job.phase) && (Boolean(job.controller) || isPendingSend(job)),
+    canRetry: !job.controller && !job.pendingReceipt && ['failed', 'cancelled'].includes(job.phase)
+      && (job.direction === 'receive' || !job.fileId) });
   function prune() {
     const disposable = job => !job.controller && !job.pendingReceipt && !isPendingSend(job);
     for (const [key, job] of jobs) if (disposable(job) && job.updatedAt < now() - 24 * 60 * 60 * 1000) jobs.delete(key);
@@ -97,7 +98,7 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
           'X-Pet-Session': job.token, 'Content-Type': 'application/json'
         }, body: JSON.stringify(payload), signal: AbortSignal.any(signals) });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || '传输状态更新失败');
+      if (!response.ok) throw Object.assign(new Error(result.error || '传输状态更新失败'), { status: response.status });
       return result;
     });
     job.wire = request.catch(() => {});
@@ -144,7 +145,9 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
     try { await writeStatus(job, payload); } catch { /* Completion has its own reliable receipt. */ }
   }
   function ensureTransferSlot(job) {
-    if ([...jobs.values()].some(item => item !== job && (item.controller || isPendingSend(item) || item.pendingReceipt))) {
+    // Saving releases the data slot; the room still arbitrates while its receipt is in flight.
+    if ([...jobs.values()].some(item => item !== job && item.phase !== 'saved'
+      && (item.controller || isPendingSend(item) || item.pendingReceipt))) {
       throw new Error('请等上一个文件传完，再发送下一个');
     }
   }
@@ -191,7 +194,8 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
         const cancelled = job.cancelRequested || job.controller.signal.aborted;
         job.error = cancelled ? '已取消' : signal.aborted ? '传输超时，可重试' : error.message;
         if (terminalPhases.has(job.serverPhase)) { job.error = job.serverError || ''; localUpdate(job, job.serverPhase); }
-        else if (reserved) await publish(job, cancelled ? 'cancelled' : 'failed');
+        // A lost reservation response may already have occupied the room's slot.
+        else if (reserved || !error.status || error.status >= 500) await publish(job, cancelled ? 'cancelled' : 'failed');
         else localUpdate(job, cancelled ? 'cancelled' : 'failed');
       } finally {
         job.controller = null;
@@ -240,6 +244,7 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
     retry: details => {
       const job = jobs.get(keyFor(roomOrigin(details.url), details.transferId));
       if (!job) throw new Error('请重新选择文件');
+      if (job.direction === 'send' && job.fileId) throw new Error('文件已上传，请对方重试接收，或重新选择文件发送');
       if (!job.controller && !job.pendingReceipt && ['failed', 'cancelled'].includes(job.phase)) {
         job.token = String(roomSessions.get(job.roomUrl) || details.token || job.token);
         run(job);

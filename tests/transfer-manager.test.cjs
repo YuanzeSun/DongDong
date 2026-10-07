@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
+const WebSocket = require('ws');
 const { createRoom } = require('../server/room.cjs');
 const { createTransferManager, roomOrigin } = require('../electron/transfer-manager.cjs');
 
@@ -177,6 +178,102 @@ test('one file stays reserved after upload until the peer saves it; retry also r
   } finally { sender.close(); receiver.close(); await ctx.room.close(); temp.clean(); }
 });
 
+test('the next file downloads after saved is broadcast, even with previous upload and receipt responses delayed', async () => {
+  const temp = scratch(); const ctx = await startRoom(temp.root);
+  let savedReplyHeld = false; let uploadReplyHeld = false;
+  let secondStartedWhileHeld = false; let firstSenderStillWaiting = false;
+  const proxy = await localServer((req, res) => {
+    const chunks = []; req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      const body = Buffer.concat(chunks);
+      const status = req.url === '/api/transfers' ? JSON.parse(body) : {};
+      const hold = status.transferId === 'first' && status.phase === 'saved';
+      const holdUpload = req.url === '/api/files' && req.headers['x-pet-transfer'] === 'first';
+      if (hold) savedReplyHeld = true;
+      if (holdUpload) uploadReplyHeld = true;
+      const upstream = http.request(`${ctx.url}${req.url}`, { method: req.method, headers: req.headers }, reply => {
+        const respond = () => { if (hold) savedReplyHeld = false; res.writeHead(reply.statusCode, reply.headers); reply.pipe(res); };
+        if (hold || holdUpload) {
+          const timer = setTimeout(respond, hold ? 500 : 750);
+          res.once('close', () => { clearTimeout(timer); if (holdUpload) uploadReplyHeld = false; });
+        } else respond();
+      });
+      upstream.on('error', () => res.destroy()); upstream.end(body);
+    });
+  });
+  const sender = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {} });
+  const receiver = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {} });
+  const sockets = []; const downloads = []; const errors = [];
+  const source = path.join(temp.root, 'sequence.txt'); fs.writeFileSync(source, 'both arrive');
+  const send = transferId => sender.upload({ url: proxy.url, token: ctx.host.token, path: source, transferId, fileName: `${transferId}.txt` });
+  try {
+    for (const session of [ctx.host, ctx.guest]) {
+      const socket = new WebSocket(`${ctx.url.replace(/^http/, 'ws')}/ws?v=4&session=${session.token}`);
+      sockets.push(socket);
+      socket.on('message', raw => {
+        const message = JSON.parse(raw);
+        if (session === ctx.host && message.type === 'transfer') {
+          sender.updateTransfer(proxy.url, message.transfer);
+          if (message.transfer.transferId === 'first' && message.transfer.phase === 'saved') {
+            firstSenderStillWaiting = uploadReplyHeld;
+            try { send('second'); } catch (error) { errors.push(error); }
+          }
+        }
+        if (session === ctx.guest && message.type === 'event' && message.event.kind === 'file') {
+          const event = message.event;
+          downloads.push((async () => {
+            await terminal(sender, event.transferId);
+            if (event.transferId === 'second') secondStartedWhileHeld = savedReplyHeld;
+            return receiver.download({ url: proxy.url, token: ctx.guest.token, ...event });
+          })().catch(error => errors.push(error)));
+        }
+      });
+      await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+    }
+    send('first');
+    await until(() => { if (errors.length) throw errors[0]; return receiver.snapshot().filter(job => job.phase === 'saved').length === 2; });
+    await Promise.all(downloads);
+    assert.equal(firstSenderStillWaiting, true);
+    assert.equal(secondStartedWhileHeld, true);
+    assert.equal(receiver.snapshot().every(job => !job.canCancel), true);
+    for (const name of ['first.txt', 'second.txt']) assert.equal(fs.readFileSync(path.join(temp.downloads, name), 'utf8'), 'both arrive');
+  } finally { sockets.forEach(socket => socket.terminate()); sender.close(); receiver.close(); await proxy.close(); await ctx.room.close(); temp.clean(); }
+});
+
+test('a lost reservation response is cleaned up reliably before another file starts', async () => {
+  const temp = scratch(); const ctx = await startRoom(temp.root);
+  let loseReservation = true; let cleanupAttempts = 0; let uploaded = 0;
+  const proxy = await localServer((req, res) => {
+    const chunks = []; req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      const body = Buffer.concat(chunks);
+      const status = req.url === '/api/transfers' ? JSON.parse(body) : {};
+      if (req.url === '/api/files') uploaded++;
+      if (status.transferId === 'lost' && status.phase === 'failed' && ++cleanupAttempts === 1) {
+        res.writeHead(503, { 'Content-Type': 'application/json' }); res.end('{"error":"try again"}'); return;
+      }
+      const upstream = http.request(`${ctx.url}${req.url}`, { method: req.method, headers: req.headers }, reply => {
+        if (status.phase === 'uploading' && loseReservation) {
+          loseReservation = false; reply.resume(); reply.on('end', () => res.destroy());
+        } else { res.writeHead(reply.statusCode, reply.headers); reply.pipe(res); }
+      });
+      upstream.on('error', () => res.destroy()); upstream.end(body);
+    });
+  });
+  const manager = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {}, receiptRetryMs: 10 });
+  try {
+    const source = path.join(temp.root, 'reservation.txt'); fs.writeFileSync(source, 'wait for reservation');
+    const details = { url: proxy.url, token: ctx.host.token, path: source };
+    manager.upload({ ...details, transferId: 'lost' });
+    assert.equal((await terminal(manager, 'lost')).phase, 'failed');
+    assert.equal(cleanupAttempts, 2); assert.equal(uploaded, 0);
+    const records = await (await fetch(`${ctx.url}/api/transfers`, { headers: { 'X-Pet-Session': ctx.host.token } })).json();
+    assert.equal(records.find(item => item.transferId === 'lost').phase, 'failed');
+    manager.upload({ ...details, transferId: 'next' });
+    assert.equal((await terminal(manager, 'next')).phase, 'uploaded'); assert.equal(uploaded, 1);
+  } finally { manager.close(); await proxy.close(); await ctx.room.close(); temp.clean(); }
+});
+
 test('completed job history is capped and expires by TTL; only allowed room origins are accepted', async () => {
   const temp = scratch(); let clock = 100;
   const fake = await localServer((req, res) => { if (!statusReply(req, res)) { res.writeHead(200, { 'Content-Length': 1 }); res.end('x'); } });
@@ -244,8 +341,9 @@ test('an in-flight download reports completion with the renewed main-window sess
 });
 
 test('a rejected reservation never uploads file bytes', async () => {
-  const temp = scratch(); let uploaded = 0;
+  const temp = scratch(); let uploaded = 0; let requests = 0;
   const fake = await localServer((req, res) => {
+    requests++;
     req.resume();
     if (req.url === '/api/files') uploaded++;
     res.writeHead(409, { 'Content-Type': 'application/json' });
@@ -257,6 +355,7 @@ test('a rejected reservation never uploads file bytes', async () => {
     manager.upload({ url: fake.url, token: 'session', path: source, transferId: 'rejected' });
     const failed = await terminal(manager, 'rejected');
     assert.equal(failed.phase, 'failed'); assert.match(failed.error, /上一个文件/); assert.equal(uploaded, 0);
+    assert.equal(requests, 1, 'a definitive rejection must not send a terminal update');
   } finally { manager.close(); await fake.close(); temp.clean(); }
 });
 

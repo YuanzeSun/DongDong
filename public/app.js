@@ -174,6 +174,7 @@ function interruptMotion() {
   motionPendingKind = null;
   state.walking = false;
   state.jumping = false;
+  $('mainMascot').classList.remove('walk-left');
   if (wasWalking || pending === 'walk') desktop?.stopWalk();
   if (wasJumping || pending === 'jump') desktop?.stopJump();
 }
@@ -232,7 +233,7 @@ function schedulePeekOuting() {
     const outings = desktop ? ['walk', 'sit', 'stretch', 'nap', 'happy'] : ['sit', 'stretch', 'nap', 'happy'];
     const outing = outings[Math.floor(Math.random() * outings.length)];
     if (outing === 'walk' && desktop) {
-      desktop.startWalk().then(started => { if (!started) finishPeekOuting(); });
+      startMotion('walk');
     }
     else {
       setPose(outing);
@@ -266,7 +267,7 @@ function unpeek(userInitiated = false) {
       state.edgeHold = false;
       schedulePeek();
     }, 180000);
-    desktop?.stopWalk();
+    beginAction(finishAction);
   }
   if (!state.peeked) return;
   state.peeked = false;
@@ -398,7 +399,7 @@ function startMotion(kind) {
     try { started = await start?.(); } catch {}
     if (epoch !== actionEpoch) return;
     motionPendingKind = null;
-    if (!started) animateRemoteAction(kind);
+    if (!started) state.edgeAutoOuting ? finishPeekOuting() : animateRemoteAction(kind);
   });
 }
 
@@ -713,7 +714,10 @@ function formatSize(bytes) {
 function transferLabel(item) {
   if (item.phase === 'saved') return item.direction === 'send' ? '对方已保存到下载' : '已保存到下载';
   if (item.phase === 'cancelled') return '已取消';
-  if (item.phase === 'failed') return item.error || (item.direction === 'receive' ? '接收失败，可重试' : '发送失败，可重试');
+  if (item.phase === 'failed') {
+    if (item.direction === 'send' && item.fileId) return '对方接收失败，可重新选择文件发送';
+    return item.error || (item.direction === 'receive' ? '接收失败，可重试' : '发送失败，可重试');
+  }
   if (item.phase === 'uploaded') return '已发送到房间';
   if (item.phase === 'waiting') return '等待接收';
   if (item.phase === 'downloading') return `${item.direction === 'send' ? '对方正在接收' : '正在保存到下载'} · ${Math.round(item.progress)}%`;
@@ -784,7 +788,8 @@ function showTransfer(item) {
   bar.hidden = ['saved', 'failed', 'cancelled', 'uploaded', 'waiting'].includes(item.phase);
   status.querySelector('.transfer-controls')?.remove();
   const canCancel = item.canCancel && ['uploading', 'uploaded', 'downloading'].includes(item.phase);
-  const canRetry = ['failed', 'cancelled'].includes(item.phase) && (item.canRetry || item.direction === 'receive' && item.fileId);
+  const canRetry = ['failed', 'cancelled'].includes(item.phase)
+    && (item.direction === 'receive' ? item.canRetry || item.fileId : item.canRetry && !item.fileId);
   if (canCancel || canRetry) {
     const controls = document.createElement('div'); controls.className = 'transfer-controls';
     const button = document.createElement('button'); button.type = 'button';
@@ -969,6 +974,7 @@ function openSocket() {
 }
 
 function persistSession() {
+  if (panelMode) return;
   localStorage.setItem(SESSION_KEY, JSON.stringify({ url: state.url, name: state.name, mode: state.mode }));
 }
 
@@ -1116,7 +1122,6 @@ async function connect(url, name, mode, { restoreHost = false } = {}) {
 }
 
 async function disconnect() {
-  if (!state.connected) return;
   ++connectionEpoch;
   state.connected = false;
   const roomUrl = state.url;
@@ -1319,7 +1324,7 @@ async function init() {
       savedFileIds.clear();
       for (const fileId of JSON.parse(event.newValue || '[]')) savedFileIds.add(fileId);
     }
-    if (event.key === SESSION_KEY && !event.newValue && state.connected) disconnect();
+    if (event.key === SESSION_KEY && !event.newValue) disconnect();
     if (event.key === SESSION_KEY && event.newValue && panelMode) {
       const saved = JSON.parse(event.newValue);
       if (saved.url !== state.url) {
