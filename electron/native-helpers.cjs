@@ -27,28 +27,6 @@ function downloadName(value) {
   return `${truncateUtf8(stem, 200 - Buffer.byteLength(extension, 'utf8')) || 'file'}${extension}`;
 }
 
-function downloadBuffer(data, maximumBytes) {
-  let buffer;
-  if (data instanceof ArrayBuffer) buffer = Buffer.from(data);
-  else if (ArrayBuffer.isView(data)) buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
-  else throw new TypeError('文件数据格式不正确');
-  if (buffer.byteLength > maximumBytes) throw new Error('文件超过允许的大小');
-  return buffer;
-}
-
-async function saveUniqueDownload(downloads, data, requestedName) {
-  const { handle, target } = await openUniqueDownload(downloads, requestedName);
-  try {
-    await handle.writeFile(data);
-    await handle.close();
-    return target;
-  } catch (error) {
-    await handle.close().catch(() => {});
-    await fs.unlink(target).catch(() => {});
-    throw error;
-  }
-}
-
 async function openUniqueDownload(downloads, requestedName) {
   await fs.mkdir(downloads, { recursive: true });
   const directory = await fs.realpath(downloads);
@@ -153,4 +131,4 @@ function tailnetPeers(status) {
     .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
 }
 
-module.exports = { downloadName, downloadBuffer, saveUniqueDownload, saveResponseDownload, clampBounds, planWalkPath, tailnetPeers };
+module.exports = { downloadName, saveResponseDownload, clampBounds, planWalkPath, tailnetPeers };

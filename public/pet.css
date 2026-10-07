@@ -1,27 +1,23 @@
-.mascot { image-rendering: pixelated; }
-.mascot.rigged { background-image: none !important; animation: none !important; }
-.mascot.rigged svg { display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.mascot.rigged.pet::after,
-.mascot.rigged.kiss::after,
-.mascot.rigged.hug::after,
-.mascot.rigged.delivery::after,
-.mascot.rigged.receive::after { content: none; }
-.window.compact { background: transparent; border: 0; box-shadow: none; }
-.window.compact .titlebar {
-  height: 0; min-height: 0; margin: 0; padding: 0; overflow: visible;
-  background: transparent; border: 0; border-radius: 0;
-  box-shadow: none;
+/* Animation frames come from PixelCatAnimator; CSS only positions the cat. */
+.mascot { position: relative; image-rendering: pixelated; transform-origin: 50% 88%; }
+.mascot svg { display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.mascot.walk-left { scale: -1 1; }
+.mascot.delivery {
+  translate: calc((var(--delivery-progress, 1) - .5) * 120px) 0;
+  transition: translate .42s cubic-bezier(.2,.8,.3,1);
 }
-.window.compact .titlebar > * { display: none; }
+@media (prefers-reduced-motion: reduce) { .mascot.delivery { translate: 0 0; transition: none; } }
+.window.compact { background: transparent; border: 0; box-shadow: none; }
+.window.compact .titlebar { display: none; }
 .window.compact .companion-main {
   /* Keep pointer events in the renderer. Native drag regions can retain a
      window drag after the pointer leaves the cat, which starves hover events. */
   -webkit-app-region: no-drag;
+  height: auto; min-height: 0; flex: 1;
 }
 .window.compact .mascot-button,
 .window.compact .compact-actions,
 .window.compact .context-menu { -webkit-app-region: no-drag; }
-.window.compact .companion-main { height: auto; min-height: 0; flex: 1; }
 .window.compact .mascot-button { margin-bottom: 5px; }
 .mascot-button { cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
 .mascot-button:active { cursor: grabbing; }
@@ -30,8 +26,6 @@
 @keyframes voice-appear { from { opacity: 0; transform: translateY(4px) scale(.92); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .window.compact .compact-actions {
   height: 55px; min-height: 55px; padding: 4px 5px 6px; margin: 0 8px 5px;
-  background: transparent; border: 0; border-radius: 0;
-  box-shadow: none;
 }
 .window.compact .floor-shadow { bottom: 1px; }
 .window.compact .speech,
@@ -123,11 +117,7 @@
 .context-menu button { display: block; width: 100%; padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: #3b6354; text-align: left; font-size: 11px; font-weight: 700; }
 .context-menu button:hover { background: #e4f3eb; color: #b85446; }
 .app-settings { flex: 1; padding: 26px 28px; overflow: auto; }
-.settings-heading { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
-.app-settings h1 { margin: 0; color: #27483c; font-size: 22px; }
-.view-back-button { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 8px 0 5px; border:1px solid #cfe2d7; border-radius:6px; background:#f4faf6; color:#397461; font-size:11px; font-weight:750; }
-.view-back-button:hover { background:#e5f4ec; color:#b85446; }
-.view-back-button img { width:15px; height:15px; }
+.app-settings h1 { margin: 0 0 8px; color: #27483c; font-size: 22px; }
 .settings-intro { margin: 0 0 22px; color: #789185; font-size: 12px; }
 .preference-settings .setting-row { margin-top: 0; border-top: 0; border-bottom: 1px solid #e6eee9; }
 .preference-settings .setting-row:last-child { border-bottom: 0; }
@@ -136,7 +126,6 @@
 .app-settings .preference-settings > .settings-title { display: none; }
 .connection-view .room-settings { margin-top: 24px; padding-top: 20px; border-top: 1px solid #dce8e0; }
 .connection-view .preference-settings { padding-top: 2px; }
-.app-settings .text-button { margin-top: 22px; }
 .action-tray { position: absolute; left: 7px; right: 7px; bottom: 57px; z-index: 8; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 8px; background: #fbfffcf5; border: 1px solid #dbe8df; border-radius: 8px; box-shadow: 0 8px 22px #2048312b; }
 .action-choice { min-width: 0; height: 43px; padding: 3px 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; border-radius: 5px; background: #edf7f1; color: #3c6756; font-size: 10px; font-weight: 700; }
 .action-choice:hover { background: #dff1e7; color: #b85446; }
@@ -164,7 +153,6 @@
 .transfer-event .event-body { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-choice span { font-size: 15px; line-height: 17px; }
 .action-choice img { width: 16px; height: 16px; }
-.mascot { position: relative; }
 body.panel-mode {
   display: block;
   min-height: 100vh;
@@ -183,32 +171,16 @@ body.panel-mode .action-tray,
 body.panel-mode .quick-composer {
   display: none !important;
 }
-body.panel-mode .companion {
-  display: flex;
-}
 body.panel-mode .expanded {
   display: flex !important;
   flex: 1;
   border-top: 0;
 }
-body.panel-mode .view-back-button,
-body.panel-mode .collapse-button,
-body.panel-mode #pinButton {
-  display: none;
-}
 .couple-badge { position:absolute; top:48px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid #dcebe3; border-radius:999px; background:#ffffffd9; color:#4f7565; box-shadow:0 3px 10px #2b4a3614; font-size:10px; z-index:3; white-space:nowrap; }
 .couple-badge span:first-child { color:#c46355; font-weight:800; }
-.couple-badge span + span { color:#8b9f95; }
 .shared-profile { margin:16px 0 4px; padding:12px; border:1px solid #dfeae4; border-radius:8px; background:#f8fcfa; }
 .shared-profile h3 { margin:0 0 10px; color:#426a5a; font-size:12px; }
 .shared-profile label { display:grid; gap:5px; margin-top:8px; color:#718b7f; font-size:10px; font-weight:700; }
-.shared-profile input,.shared-profile textarea { width:100%; border:1px solid #d3e3da; border-radius:5px; background:#fff; color:#28473b; padding:7px 8px; font:inherit; font-weight:400; resize:vertical; }
+.shared-profile input { width:100%; border:1px solid #d3e3da; border-radius:5px; background:#fff; color:#28473b; padding:7px 8px; font:inherit; font-weight:400; }
 .secondary-button { width:100%; height:32px; margin-top:10px; border:1px solid #b8d8c8; border-radius:5px; color:#28735d; background:#e8f6ee; font-size:11px; font-weight:800; }
 .secondary-button:hover { background:#d9f0e3; }
-.open-downloads-button { margin-top:10px; }
-.care-button { color:#b65b56; }
-.care-button img { filter:invert(40%) sepia(29%) saturate(1100%) hue-rotate(320deg); }
-.action-tray { grid-template-columns:repeat(4,1fr); }
-.return-button { display:inline-flex; align-items:center; gap:5px; width:auto; min-width:92px; padding:0 8px; color:#397461; font-size:11px; font-weight:750; }
-.return-button img { width:15px; height:15px; }
-.return-button:hover { background:#e5f4ec; color:#b85446; }

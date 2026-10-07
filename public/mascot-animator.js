@@ -120,7 +120,7 @@
     return output;
   }
 
-  const normalize = pose => ({ nap: 'sleep', 'walk-1': 'walk', 'walk-2': 'walk', wiggle: 'wave' }[pose] || pose);
+  const normalize = pose => ({ nap: 'sleep' }[pose] || pose);
   class PixelCatAnimator {
     constructor(host) {
       this.host = host;
@@ -130,7 +130,6 @@
       const parsed = new DOMParser().parseFromString(ART, 'image/svg+xml');
       this.svg = document.importNode(parsed.documentElement, true);
       host.appendChild(this.svg);
-      host.classList.add('rigged');
       this.parts = {};
       for (const id of ['stand', 'walk', 'walk-body', 'walk-head', 'walk-tail', 'walk-leg-near-back', 'walk-leg-near-front', 'walk-leg-far-back', 'walk-leg-far-front', 'loaf', 'loaf-body', 'loaf-head', 'loaf-tail', 'loaf-eye-open', 'loaf-eye-closed', 'loaf-eye-happy', 'sleep', 'sleep-body', 'sleep-head', 'bed-back', 'bed-front', 'tail', 'tail-line', 'tail-color', 'tail-stripe', 'rear-left', 'rear-right', 'body', 'head', 'paw-left', 'paw-right', 'eye-open', 'eye-closed', 'eye-happy', 'mouth-smile', 'mouth-open', 'mouth-tongue', 'prop-fish', 'prop-heart', 'prop-yarn', 'prop-envelope', 'prop-spark', 'prop-z', 'prop-hand']) {
         this.parts[id] = this.svg.querySelector(`#cat-${id}`);

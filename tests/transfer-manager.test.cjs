@@ -19,7 +19,9 @@ async function until(predicate, timeout = 3000) {
   throw new Error(`Condition not met in ${timeout}ms`);
 }
 function terminal(manager, transferId, timeout) {
-  return until(() => manager.snapshot().find(job => job.transferId === transferId && !job.canCancel && ['uploaded', 'saved', 'failed', 'cancelled'].includes(job.phase)), timeout);
+  return until(() => manager.snapshot().find(job => job.transferId === transferId
+    && ['uploaded', 'saved', 'failed', 'cancelled'].includes(job.phase)
+    && (job.phase === 'uploaded' || job.phase === 'saved' && !job.canCancel || job.canRetry)), timeout);
 }
 function scratch() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dongdong-transfer-'));
@@ -27,10 +29,10 @@ function scratch() {
   return { root, downloads, clean: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 async function startRoom(root) {
-  const room = createRoom({ host: '127.0.0.1', port: 0, key: 'secret', hostId: 'host', dataDir: path.join(root, 'room'), staticDir: path.join(__dirname, '..', 'public') });
+  const room = createRoom({ host: '127.0.0.1', port: 0, hostId: 'host', dataDir: path.join(root, 'room'), staticDir: path.join(__dirname, '..', 'public') });
   const { port } = await room.listen(); const url = `http://127.0.0.1:${port}`;
   async function session(senderId, mode) {
-    const response = await fetch(`${url}/api/session`, { method: 'POST', headers: { 'X-Pet-Key': 'secret', 'Content-Type': 'application/json' }, body: JSON.stringify({ senderId, senderName: senderId, mode }) });
+    const response = await fetch(`${url}/api/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senderId, senderName: senderId, mode }) });
     assert.equal(response.status, 201); return response.json();
   }
   return { room, url, host: await session('host', 'host'), guest: await session('guest', 'join') };
@@ -52,7 +54,7 @@ test('native transfer manager streams real room upload/download and publishes sa
   const receiver = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: job => phases.push(`receive:${job.phase}`) });
   try {
     const content = crypto.randomBytes(280000); const source = path.join(temp.root, '照片 中文.bin'); fs.writeFileSync(source, content);
-    const initial = sender.upload({ url: ctx.url, token: ctx.host.token, path: source, transferId: 'real-transfer', clientId: 'real-client' });
+    const initial = sender.upload({ url: ctx.url, token: ctx.host.token, path: source, transferId: 'real-transfer' });
     assert.equal(initial.phase, 'uploading'); assert.equal(initial.canCancel, true);
     const sent = await terminal(sender, 'real-transfer'); assert.equal(sent.phase, 'uploaded'); assert.equal(sent.progress, 100);
     const saved = await receiver.download({ url: ctx.url, token: ctx.guest.token, fileId: sent.fileId, fileName: '照片 中文.bin', transferId: 'real-transfer' });
@@ -101,6 +103,7 @@ test('download idle timeout removes partial file before the overall deadline', a
   const manager = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {}, idleTimeoutMs: 80, totalTimeoutMs: 1000 });
   try {
     const downloading = manager.download({ url: fake.url, token: 'test', fileId: crypto.randomUUID(), fileName: 'partial.bin', transferId: 'idle-receive' });
+    assert.throws(() => manager.download({ url: fake.url, token: 'test', fileId: crypto.randomUUID(), fileName: 'another.bin', transferId: 'second-receive' }), /上一个文件/);
     const failed = await terminal(manager, 'idle-receive', 700);
     assert.equal(failed.phase, 'failed'); assert.match(failed.error, /超时/); assert.equal(failed.canRetry, true);
     await downloading; assert.deepEqual(fs.readdirSync(temp.downloads), []);
@@ -120,12 +123,13 @@ test('cancelled partial downloads clean disk, and retry saves the full file', as
     await until(() => manager.snapshot()[0]?.progress > 0);
     assert.equal(manager.cancel({ url: fake.url, transferId: 'cancel-receive' }), true);
     assert.equal((await downloading).phase, 'cancelled'); assert.deepEqual(fs.readdirSync(temp.downloads), []);
+    assert.equal((await manager.download({ url: fake.url, token: 'test', transferId: 'cancel-receive' })).phase, 'cancelled');
     stall = false; manager.retry({ url: fake.url, token: 'fresh-session', transferId: 'cancel-receive' });
     const saved = await terminal(manager, 'cancel-receive'); assert.equal(saved.phase, 'saved'); assert.deepEqual(fs.readFileSync(saved.savedPath), data);
   } finally { manager.close(); await fake.close(); temp.clean(); }
 });
 
-test('retry after losing the upload response reuses clientId without duplicating a room event', async () => {
+test('retry after losing the upload response reuses the transfer without duplicating a file or room event', async () => {
   const temp = scratch(); const ctx = await startRoom(temp.root); let loseReply = true;
   const proxy = await localServer((req, res) => {
     const upstream = http.request(`${ctx.url}${req.url}`, { method: req.method, headers: req.headers }, reply => {
@@ -138,7 +142,7 @@ test('retry after losing the upload response reuses clientId without duplicating
   const manager = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {}, idleTimeoutMs: 300, totalTimeoutMs: 3000 });
   try {
     const source = path.join(temp.root, 'retry.txt'); fs.writeFileSync(source, 'exactly once');
-    manager.upload({ url: proxy.url, token: ctx.host.token, path: source, transferId: 'retry-transfer', clientId: 'retry-client' });
+    manager.upload({ url: proxy.url, token: ctx.host.token, path: source, transferId: 'retry-transfer' });
     assert.equal((await terminal(manager, 'retry-transfer')).phase, 'failed');
     manager.retry({ url: proxy.url, token: ctx.host.token, transferId: 'retry-transfer' });
     assert.equal((await terminal(manager, 'retry-transfer')).phase, 'uploaded');
@@ -148,24 +152,29 @@ test('retry after losing the upload response reuses clientId without duplicating
   } finally { manager.close(); await proxy.close(); await ctx.room.close(); temp.clean(); }
 });
 
-test('room-specific cancellation leaves other transfers running, and active capacity is bounded', async () => {
-  const temp = scratch();
-  const handler = (req, res) => { if (!statusReply(req, res)) { res.writeHead(200, { 'Content-Length': 5000 }); res.write(Buffer.alloc(1000, 'x')); } };
-  const first = await localServer(handler); const second = await localServer(handler);
-  const manager = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {}, idleTimeoutMs: 2000, totalTimeoutMs: 4000 });
+test('one file stays reserved after upload until the peer saves it; retry also respects that slot', async () => {
+  const temp = scratch(); const ctx = await startRoom(temp.root);
+  const sender = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {} });
+  const receiver = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {} });
   try {
-    const one = manager.download({ url: first.url, token: 'test', transferId: 'same-id', fileId: crypto.randomUUID(), fileName: 'one' });
-    const two = manager.download({ url: second.url, token: 'test', transferId: 'same-id', fileId: crypto.randomUUID(), fileName: 'two' });
-    await until(() => manager.snapshot().filter(job => job.progress > 0).length === 2);
-    manager.cancelRoom(first.url); assert.equal((await one).phase, 'cancelled');
-    assert.equal(manager.snapshot().find(job => job.roomUrl === second.url).canCancel, true);
-    const downloads = [two];
-    for (let index = 1; index < 8; index++) downloads.push(manager.download({ url: second.url, token: 'test', transferId: `capacity-${index}`, fileId: crypto.randomUUID(), fileName: `capacity-${index}` }));
-    assert.throws(() => manager.download({ url: second.url, token: 'test', transferId: 'too-many', fileId: crypto.randomUUID(), fileName: 'extra' }), /太多/);
-    assert.throws(() => manager.retry({ url: first.url, token: 'test', transferId: 'same-id' }), /太多/);
-    manager.close(); assert.ok((await Promise.all(downloads)).every(job => job.phase === 'cancelled'));
-    assert.deepEqual(fs.readdirSync(temp.downloads), []);
-  } finally { manager.close(); await first.close(); await second.close(); temp.clean(); }
+    const source = path.join(temp.root, 'one.txt'); fs.writeFileSync(source, 'one at a time');
+    const details = { url: ctx.url, token: ctx.host.token, path: source };
+    sender.upload({ ...details, path: path.join(temp.root, 'missing.txt'), transferId: 'failed-before' });
+    assert.equal((await terminal(sender, 'failed-before')).phase, 'failed');
+    sender.upload({ ...details, transferId: 'one' });
+    assert.throws(() => sender.upload({ ...details, transferId: 'two' }), /上一个文件/);
+    const uploaded = await terminal(sender, 'one'); assert.equal(uploaded.phase, 'uploaded');
+    assert.equal(uploaded.canCancel, true);
+    assert.throws(() => sender.upload({ ...details, transferId: 'two' }), /上一个文件/);
+    assert.throws(() => sender.retry({ url: ctx.url, transferId: 'failed-before' }), /上一个文件/);
+    const saved = await receiver.download({ url: ctx.url, token: ctx.guest.token, transferId: 'one', fileId: uploaded.fileId, fileName: 'one.txt' });
+    assert.equal(saved.phase, 'saved');
+    const snapshots = await (await fetch(`${ctx.url}/api/transfers`, { headers: { 'X-Pet-Session': ctx.host.token } })).json();
+    sender.updateTransfer(ctx.url, snapshots.find(item => item.transferId === 'one'));
+    assert.equal(sender.snapshot().find(item => item.transferId === 'one').canCancel, false);
+    sender.upload({ ...details, transferId: 'two' });
+    assert.equal((await terminal(sender, 'two')).phase, 'uploaded');
+  } finally { sender.close(); receiver.close(); await ctx.room.close(); temp.clean(); }
 });
 
 test('completed job history is capped and expires by TTL; only allowed room origins are accepted', async () => {
@@ -201,6 +210,7 @@ test('main-window session updates override expired panel tokens for new work and
     const source = path.join(temp.root, 'session.txt'); fs.writeFileSync(source, 'ok');
     manager.upload({ url: fake.url, token: 'expired-panel', transferId: 'session-upload', path: source });
     assert.equal((await terminal(manager, 'session-upload')).phase, 'uploaded');
+    manager.updateTransfer(fake.url, { transferId: 'session-upload', phase: 'saved', progress: 100 });
     const details = { url: fake.url, token: 'expired-panel', transferId: 'session-download', fileId: crypto.randomUUID(), fileName: 'session.txt' };
     failDownload = true; assert.equal((await manager.download(details)).phase, 'failed');
     currentToken = 'main-reconnected'; manager.updateSession(fake.url, currentToken);
@@ -230,5 +240,67 @@ test('an in-flight download reports completion with the renewed main-window sess
     assert.equal((await result).phase, 'saved');
     assert.equal(reports.find(item => item.phase === 'saved').token, 'main-after');
     assert.equal(reports.some(item => item.token === 'closed-panel'), false);
+  } finally { manager.close(); await fake.close(); temp.clean(); }
+});
+
+test('a rejected reservation never uploads file bytes', async () => {
+  const temp = scratch(); let uploaded = 0;
+  const fake = await localServer((req, res) => {
+    req.resume();
+    if (req.url === '/api/files') uploaded++;
+    res.writeHead(409, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: '请等上一个文件传完' }));
+  });
+  const manager = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {} });
+  try {
+    const source = path.join(temp.root, 'not-uploaded.txt'); fs.writeFileSync(source, 'stay local');
+    manager.upload({ url: fake.url, token: 'session', path: source, transferId: 'rejected' });
+    const failed = await terminal(manager, 'rejected');
+    assert.equal(failed.phase, 'failed'); assert.match(failed.error, /上一个文件/); assert.equal(uploaded, 0);
+  } finally { manager.close(); await fake.close(); temp.clean(); }
+});
+
+test('saved receipts retry HTTP errors and renew their session without downloading twice', async () => {
+  const temp = scratch(); let savedAttempts = 0; let downloads = 0; const receipts = [];
+  const fake = await localServer((req, res) => {
+    if (req.url !== '/api/transfers') { downloads++; res.writeHead(200, { 'Content-Length': 2 }); res.end('ok'); return; }
+    let body = ''; req.on('data', data => { body += data; });
+    req.on('end', () => {
+      const item = JSON.parse(body);
+      res.setHeader('Content-Type', 'application/json');
+      if (item.phase === 'saved') {
+        savedAttempts++;
+        receipts.push(req.headers['x-pet-session']);
+        if (savedAttempts === 1) { res.writeHead(503); res.end('{"error":"retry receipt"}'); return; }
+        if (req.headers['x-pet-session'] !== 'renewed') { res.writeHead(401); res.end('{"error":"expired"}'); return; }
+      }
+      res.end('{}');
+    });
+  });
+  const manager = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {}, receiptRetryMs: 10 });
+  try {
+    const saved = await manager.download({ url: fake.url, token: 'old', fileId: crypto.randomUUID(), fileName: 'receipt.txt', transferId: 'receipt' });
+    assert.equal(saved.phase, 'saved'); assert.equal(fs.readFileSync(saved.savedPath, 'utf8'), 'ok');
+    await until(() => savedAttempts >= 2);
+    manager.updateSession(fake.url, 'renewed');
+    await until(() => receipts.includes('renewed'));
+    assert.equal(downloads, 1); assert.equal(manager.snapshot()[0].phase, 'saved');
+  } finally { manager.close(); await fake.close(); temp.clean(); }
+});
+
+test('forgetting a room aborts work and suppresses stale progress', async () => {
+  const temp = scratch(); const reports = []; let started = false;
+  const fake = await localServer((req, res) => {
+    if (statusReply(req, res)) return;
+    started = true; res.writeHead(200, { 'Content-Length': 1000 }); res.write(Buffer.alloc(100));
+  });
+  const manager = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: item => reports.push(item) });
+  try {
+    const downloading = manager.download({ url: fake.url, token: 'session', fileId: crypto.randomUUID(), fileName: 'old.txt', transferId: 'old-room' });
+    await until(() => started && manager.snapshot()[0].progress > 0);
+    manager.forgetRoom(fake.url); const reportCount = reports.length;
+    await downloading;
+    assert.deepEqual(manager.snapshot(), []); assert.equal(reports.length, reportCount);
+    assert.deepEqual(fs.readdirSync(temp.downloads), []);
   } finally { manager.close(); await fake.close(); temp.clean(); }
 });

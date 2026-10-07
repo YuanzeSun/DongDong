@@ -16,7 +16,7 @@ test('connection retries back off with jitter and never exceed thirty seconds', 
   }
 });
 
-test('recovery retries offline and temporary server failures but stops for invalid pairing', () => {
+test('recovery retries offline and temporary server failures but stops for rejected sessions', () => {
   for (const error of [new TypeError('Failed to fetch'), { code: 'ROOM_UNREACHABLE' }, { status: 408 }, { status: 429 }, { status: 503 }]) {
     assert.equal(shouldRetry(error), true);
   }

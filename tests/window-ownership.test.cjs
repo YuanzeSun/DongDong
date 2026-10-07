@@ -59,9 +59,9 @@ for (const panel of ['settings', 'chat']) {
       setPose('sleep'); transitionPose('nest');
       wakeThen(() => { throw new Error('Panel ran a motion callback'); });
       speak('喵'); actionVoice('purr');
-      animatePet(); animateRemoteAction('purr'); animateLocalAction('walk');
-      animateWalkFallback(); startMotion('walk'); startMotion('jump');
-      onWalkState(true); onJumpState(true); interruptMotion();
+      animateLocalAction('happy'); animateRemoteAction('purr'); animateLocalAction('walk');
+      startMotion('walk'); startMotion('jump');
+      onMotionState('walk', true); onMotionState('jump', true); interruptMotion();
       state.peeked = true;
       state.edgeAutoOuting = true;
       unpeek(true); finishPeekOuting();

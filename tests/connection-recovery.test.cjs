@@ -12,7 +12,7 @@ function renderer(panelKind = '') {
   const sockets = [];
   let nextTimer = 1;
   const environment = { addresses: [], starts: 0, stops: 0 };
-  const element = () => ({ hidden: false, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, replaceChildren() {}, setAttribute() {} });
+  const element = () => ({ hidden: false, value: '', dataset: {}, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, replaceChildren() {}, setAttribute() {} });
   class Socket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -23,7 +23,7 @@ function renderer(panelKind = '') {
     window: { ConnectionPolicy, petDesktop: {
       panelKind,
       addresses: async () => environment.addresses,
-      startHost: async address => { environment.starts++; return { url: `http://${address}:4827`, key: 'saved-key' }; },
+      startHost: async address => { environment.starts++; return { url: `http://${address}:4827` }; },
       stopHost: async () => { environment.stops++; },
       setOnline() {}, setWindowSize() {}, closePanel() {}
     } },
@@ -43,7 +43,7 @@ function renderer(panelKind = '') {
   run(`setView = setExpanded = startCatActivity = setQuickComposer = setActionTray = applyProfile = () => {};
     transitionPose = () => {}; scheduleIdleAction = () => {}; loadTransferSnapshot = async () => {};
     cancelRoomTransfers = () => {};`);
-  return { context, run, elements, timers, sockets, environment, async retry() {
+  return { context, run, elements, timers, sockets, environment, storage, async retry() {
     const id = run('state.reconnectTimer');
     const timer = timers.get(id);
     assert.ok(timer, 'expected a scheduled recovery attempt');
@@ -54,7 +54,7 @@ function renderer(panelKind = '') {
 
 test('saved host waits in offline mode for Tailscale then restores its room', async () => {
   const page = renderer();
-  await page.run(`connect('100.80.0.1:4827', 'saved-key', '我', 'host', { restoreHost: true })`);
+  await page.run(`connect('100.80.0.1:4827', '我', 'host', { restoreHost: true })`);
   assert.equal(page.run('state.connected'), true);
   assert.equal(page.run('state.roomConnection'), 'reconnecting');
   assert.equal(page.elements.get('companion').hidden, false);
@@ -74,7 +74,7 @@ test('leaving a room wins over a session request already in flight', async () =>
   const page = renderer();
   let finishSession;
   page.context.fetch = () => new Promise(resolve => { finishSession = resolve; });
-  page.run(`state.connected = true; state.url = 'http://100.80.0.1:4827'; state.key = 'saved-key'; scheduleSessionRetry(0)`);
+  page.run(`state.connected = true; state.url = 'http://100.80.0.1:4827'; scheduleSessionRetry(0)`);
   const pending = page.retry();
   await Promise.resolve();
   await page.run('disconnect()');
@@ -102,7 +102,7 @@ test('a brief outage updates presence immediately but cancels sleep when the pee
 test('an auxiliary settings window never starts the host during session restoration', async () => {
   const page = renderer('settings');
   page.environment.addresses = [{ address: '100.80.0.1' }];
-  await page.run(`connect('100.80.0.1:4827', 'saved-key', '我', 'host', { restoreHost: true })`);
+  await page.run(`connect('100.80.0.1:4827', '我', 'host', { restoreHost: true })`);
   assert.equal(page.environment.starts, 0);
   assert.equal(page.run('state.hostStarted'), false);
   assert.equal(page.sockets.length, 1);
@@ -110,7 +110,7 @@ test('an auxiliary settings window never starts the host during session restorat
 
 test('resume promptly replaces a stale open socket without waiting for its TCP timeout', async () => {
   const page = renderer();
-  await page.run(`connect('100.80.0.1:4827', 'saved-key', '我', 'join')`);
+  await page.run(`connect('100.80.0.1:4827', '我', 'join')`);
   const stale = page.sockets[0];
   stale.readyState = 1;
   page.run('recoverConnection(true)');
@@ -119,4 +119,18 @@ test('resume promptly replaces a stale open socket without waiting for its TCP t
   assert.equal(page.timers.get(page.run('state.reconnectTimer')).delay, 0);
   await page.retry();
   assert.equal(page.sockets.length, 2);
+});
+
+test('opening a direct IP session sends identity without a pairing code', async () => {
+  const page = renderer();
+  let request;
+  page.context.fetch = async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({ token: 'direct-token' }) };
+  };
+  const session = await page.run(`openSession('http://100.80.0.1:4827', '我', 'join')`);
+  assert.equal(session.token, 'direct-token');
+  assert.equal(request.url, 'http://100.80.0.1:4827/api/session');
+  assert.deepEqual(JSON.parse(request.options.body), { senderId: 'recovery-test', senderName: '我', mode: 'join', fresh: false });
+  assert.equal(request.options.headers['X-Pet-Key'], undefined);
 });

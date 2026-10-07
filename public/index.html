@@ -7,7 +7,6 @@
   <title>咚咚 · 桌面传送门</title>
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./pet.css">
-  <link rel="stylesheet" href="./animations.css">
   <script src="./mascot-animator.js" defer></script>
   <script src="./connection-policy.js" defer></script>
   <script src="./app.js" defer></script>
@@ -18,7 +17,6 @@
       <div class="brand"><span>咚咚</span></div>
       <div class="title-actions">
         <span class="status" id="status">待连接</span>
-        <button class="icon-button desktop-only" id="pinButton" title="取消置顶" aria-label="切换置顶" hidden><img src="./icons/pin.svg" alt=""></button>
         <button class="icon-button" id="settingsButton" title="设置" aria-label="打开设置"><img src="./icons/settings.svg" alt=""></button>
         <button class="icon-button desktop-only" id="closeButton" title="关闭" aria-label="关闭"><img src="./icons/x.svg" alt=""></button>
       </div>
@@ -44,17 +42,13 @@
         <label>对方的 Tailscale 地址<input id="joinAddress" inputmode="url" placeholder="100.x.y.z" required></label>
         <div class="scan-heading"><span>同一 Tailscale 网络</span><button id="scanPeersButton" type="button" title="重新扫描设备"><img src="./icons/scan-search.svg" alt="">扫描设备</button></div>
         <div class="scan-results" id="scanResults" aria-live="polite" hidden></div>
-        <label>配对码<input id="joinKey" autocomplete="off" spellcheck="false" placeholder="从对方那里获取" required></label>
-        <button class="primary-button" type="submit">加入房间 <img src="./icons/arrow-right.svg" alt=""></button>
+        <button class="primary-button" type="submit">连接对方 <img src="./icons/arrow-right.svg" alt=""></button>
       </form>
       <p class="feedback" id="setupFeedback" role="alert"></p>
     </section>
 
     <section class="app-settings" id="appSettings" hidden>
-      <div class="settings-heading">
-        <button class="view-back-button" id="settingsBackButton" type="button" title="回到连接"><img src="./icons/arrow-left.svg" alt=""><span>回到连接</span></button>
-        <h1>应用设置</h1>
-      </div>
+      <h1>应用设置</h1>
       <div id="setupPreferences">
         <section class="preference-settings" id="preferenceSettings" aria-labelledby="preferencesTitle">
           <h2 class="settings-title" id="preferencesTitle">应用偏好</h2>
@@ -108,7 +102,6 @@
         <div class="tabs" role="tablist" aria-label="房间视图">
           <button class="selected" id="chatTab" role="tab" aria-selected="true">对话</button>
           <button id="connectionTab" role="tab" aria-selected="false">设置</button>
-          <button class="collapse-button return-button" id="collapseButton" title="回到小猫" aria-label="回到小猫"><img src="./icons/arrow-left.svg" alt=""><span>回到小猫</span></button>
         </div>
         <div id="chatView" class="chat-view">
           <div class="events" id="events" aria-live="polite"></div>
@@ -124,8 +117,7 @@
           <h2 class="settings-title" id="roomSettingsTitle">房间设置</h2>
           <div class="presence-card"><span class="presence-dot" id="presenceDot"></span><span id="presenceText">正在检查对方状态…</span></div>
           <p class="connection-label">房间地址</p><div class="copy-line"><code id="roomAddress"></code><button class="icon-button copy-button" id="copyAddress" title="复制地址" aria-label="复制地址"><img src="./icons/copy.svg" alt=""></button></div>
-          <div id="hostKeyBlock"><p class="connection-label">配对码</p><div class="copy-line"><code id="roomKey"></code><button class="icon-button copy-button" id="copyKey" title="复制配对码" aria-label="复制配对码"><img src="./icons/copy.svg" alt=""></button></div></div>
-          <p class="connection-hint">把地址和配对码发给对方。收到的文件会保存到本机“下载”文件夹。</p>
+          <p class="connection-hint">一端开启房间，另一端输入它的 Tailscale IP 即可连接。收到的文件自动保存到“下载”，传完一份再发下一份。</p>
           <div class="shared-profile">
             <h3>你们的小窝</h3>
             <label>小猫昵称<input id="profilePetName" maxlength="24" placeholder="例如：橘子"></label>

@@ -4,14 +4,17 @@ const panelKind = desktop?.panelKind || '';
 const panelMode = panelKind === 'chat' || panelKind === 'settings';
 const catAnimator = !panelMode && window.PixelCatAnimator ? new window.PixelCatAnimator($('mainMascot')) : null;
 const DEFAULT_PET_NAME = '小橘';
-const SESSION_KEY = 'dongdong-session-v3';
-const SAVED_FILES_KEY = 'dongdong-saved-files-v3';
-const senderId = localStorage.getItem('dongdong-sender-id-v3') || crypto.randomUUID();
-localStorage.setItem('dongdong-sender-id-v3', senderId);
+const SESSION_KEY = 'dongdong-session-v4';
+let roomIdentity = '';
+let uploadStarting = false;
+let freshConnection = false;
+const SAVED_FILES_KEY = 'dongdong-saved-files-v4';
+const senderId = localStorage.getItem('dongdong-sender-id-v4') || crypto.randomUUID();
+localStorage.setItem('dongdong-sender-id-v4', senderId);
 
 const state = {
-  mode: 'host', url: '', key: '', token: '', name: '', socket: null,
-  connected: false, roomConnection: 'closed', expanded: false, pinned: true, view: 'chat', peerOnline: false,
+  mode: 'host', url: '', token: '', name: '', socket: null,
+  connected: false, roomConnection: 'closed', expanded: false, view: 'chat', peerOnline: false,
   peerName: '对方', profile: {},
   reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, jumping: false, pose: 'idle',
   idleActions: JSON.parse(localStorage.getItem('dongdong-idle-actions') ?? 'true'),
@@ -23,8 +26,6 @@ const seenEvents = new Set();
 let poseTimer;
 let napTimer;
 let blinkTimer;
-let walkFrameTimer;
-let walkFallbackTimer;
 let wakeTimer;
 let wakeCallback;
 let stanceTimer;
@@ -34,7 +35,6 @@ let motionPendingKind = null;
 let peekTimer;
 let peekOutingTimer;
 let edgeHoldTimer;
-let deliveryFinishTimer;
 let connectionEpoch = 0;
 let reconnectAttempt = 0;
 let retryInFlightEpoch = null;
@@ -42,7 +42,6 @@ let socketConnectTimer;
 let offlineNapDeadline = 0;
 let hostNeedsStart = false;
 let recoveryBlocked = false;
-const pendingDeliveries = new Map();
 const activeDownloads = new Set();
 const savedFileIds = new Set(JSON.parse(localStorage.getItem(SAVED_FILES_KEY) || '[]'));
 const transferStates = new Map();
@@ -117,44 +116,23 @@ function updateConnectionStatus() {
 
 function setPose(pose) {
   if (panelMode) return;
-  const previous = state.pose.startsWith('walk-') ? 'walk' : state.pose;
-  const next = pose.startsWith('walk-') ? 'walk' : pose;
+  const previous = state.pose;
   clearTimeout(wakeTimer);
   clearTimeout(stanceTimer);
   wakeTimer = null;
   wakeCallback = null;
   state.pose = pose;
-  const pet = $('mainMascot');
-  pet.classList.remove('wiggle', 'happy', 'jump', 'nap', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'delivery', 'receive', 'speech-pop', 'hug', 'kiss', 'groom', 'purr', 'waking');
-  // Keep the sprite visible even when a logical action has no dedicated art.
-  // A missing background image makes the transparent mascot look like it
-  // vanished mid-action, which is especially jarring for remote gestures.
-  const sprite = {
-    idle: 'mascot', nap: 'mascot-nap', sleep: 'mascot-nap',
-    blink: 'mascot-blink', wave: 'mascot-wave', happy: 'mascot-happy', jump: 'mascot-jump',
-    pet: 'mascot-pet', fish: 'mascot-fish', sit: 'mascot-sit', stretch: 'mascot-stretch',
-    hug: 'mascot-hug', kiss: 'mascot-kiss', groom: 'mascot-groom', purr: 'mascot-purr',
-    'walk-1': 'mascot-walk-1', 'walk-2': 'mascot-walk-2'
-  }[pose] || 'mascot';
-  pet.style.backgroundImage = `url('./${sprite}.svg')`;
+  $('mainMascot').classList.remove('delivery');
   catAnimator?.play(pose);
-  if (previous !== next) actionVoice(next);
-  if (pose === 'wave') pet.classList.add('wiggle');
-  if (pose === 'happy') pet.classList.add('happy');
-  if (pose === 'nap' || pose === 'sleep') pet.classList.add('nap', 'sleep');
-  if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(pose)) pet.classList.add(pose);
+  if (previous !== pose) actionVoice(pose);
 }
 
 function wakeThen(callback) {
   if (panelMode) return;
-  const pet = $('mainMascot');
   const resting = state.pose;
   if (!['nap', 'sleep', 'nest', 'nest-enter', 'loaf', 'loaf-enter', 'purr'].includes(resting)) return callback();
   wakeCallback = callback;
   if (wakeTimer) return;
-  pet.classList.remove('waking');
-  void pet.offsetWidth;
-  pet.classList.add('waking');
   const rise = resting === 'nest' || resting === 'nest-enter' ? 'nest-rise' : ['loaf', 'loaf-enter', 'purr'].includes(resting) ? 'loaf-rise' : 'wake';
   catAnimator?.play(rise);
   wakeTimer = setTimeout(() => {
@@ -196,8 +174,6 @@ function interruptMotion() {
   motionPendingKind = null;
   state.walking = false;
   state.jumping = false;
-  clearInterval(walkFrameTimer);
-  clearTimeout(walkFallbackTimer);
   if (wasWalking || pending === 'walk') desktop?.stopWalk();
   if (wasJumping || pending === 'jump') desktop?.stopJump();
 }
@@ -323,7 +299,7 @@ function scheduleIdleAction() {
         if (state.connected && state.pose === action) transitionPose('idle');
       }, (catAnimator?.durationFor(action) || 1800) + 80));
     } else {
-      animatePet(action);
+      animateLocalAction(action);
     }
     scheduleIdleAction();
   }, 28000 + Math.random() * 24000);
@@ -349,7 +325,6 @@ function setPeerOnline(online) {
   if (presence.online) { offlineNapDeadline = 0; clearTimeout(napTimer); }
   state.peerOnline = Boolean(presence.online);
   state.peerName = presence.peerName || state.peerName || '对方';
-  if (!panelMode) desktop?.setOnline(state.peerOnline);
   if (!state.peerOnline && !panelMode) {
     for (const item of transferStates.values()) if (item.roomUrl === state.url
       && (item.phase === 'uploaded' || item.phase === 'uploading' && item.direction === 'receive')) showTransfer(item);
@@ -367,164 +342,69 @@ function setPeerOnline(online) {
   }
 }
 
-function animatePet(kind = 'happy') {
-  if (panelMode) return;
-  interruptMotion();
-  const epoch = ++actionEpoch;
+function resetAction() {
   clearTimeout(poseTimer);
   clearTimeout(napTimer);
   clearTimeout(state.idleTimer);
-  const target = kind === 'wiggle' ? 'wave' : 'happy';
-  transitionPose(target, () => {
-    if (epoch !== actionEpoch) return;
-    poseTimer = setTimeout(() => transitionPose(state.peerOnline ? 'idle' : 'nap'), (catAnimator?.durationFor(target) || 1500) + 80);
-  });
-  if (state.peerOnline) scheduleNap();
+  return ++actionEpoch;
+}
+
+function beginAction(callback) {
+  if (panelMode) return;
+  interruptMotion();
+  const epoch = resetAction();
+  wakeThen(() => { if (epoch === actionEpoch) callback(epoch); });
+}
+
+function finishAction() {
+  if (activeTransferAnimations.size) return animateDelivery(0, true);
+  transitionPose(state.peerOnline ? 'idle' : 'nap');
+  if (state.connected) { scheduleNap(); scheduleIdleAction(); }
 }
 
 function animateDelivery(progress = 1, hold = false) {
   if (panelMode) return;
-  if (hold && catAnimator?.action === 'delivery-hold') {
-    $('mainMascot').style.setProperty('--delivery-progress', String(progress));
-    return;
-  }
-  interruptMotion();
-  const epoch = ++actionEpoch;
-  clearTimeout(poseTimer);
-  clearTimeout(deliveryFinishTimer);
-  clearTimeout(napTimer);
-  clearTimeout(state.idleTimer);
-  wakeThen(() => {
-    if (epoch !== actionEpoch) return;
+  const pet = $('mainMascot');
+  pet.style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, progress))));
+  if (hold && state.pose === 'delivery-hold') return;
+  beginAction(() => {
     if (hold && !activeTransferAnimations.size) return;
-    const pet = $('mainMascot');
-    const continuing = pet.classList.contains('delivery') && catAnimator?.action === (hold ? 'delivery-hold' : 'delivery');
-    if (!continuing) {
-      setPose(hold ? 'delivery-hold' : 'idle');
-      pet.classList.remove('delivery');
-      void pet.offsetWidth;
-      pet.classList.add('delivery');
-      catAnimator?.play(hold ? 'delivery-hold' : 'delivery');
-    }
-    pet.style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, progress))));
-    if (!hold) deliveryFinishTimer = setTimeout(() => { if (epoch === actionEpoch) { pet.classList.remove('delivery'); transitionPose(state.peerOnline ? 'idle' : 'nap'); } }, 2600);
+    setPose(hold ? 'delivery-hold' : 'delivery');
+    pet.classList.add('delivery');
+    if (!hold) poseTimer = setTimeout(finishAction, 2600);
   });
 }
 
 function animateReceive() {
-  if (panelMode) return;
-  interruptMotion();
-  const epoch = ++actionEpoch;
-  clearTimeout(poseTimer);
-  clearTimeout(deliveryFinishTimer);
-  clearTimeout(napTimer);
-  clearTimeout(state.idleTimer);
-  wakeThen(() => {
-    if (epoch !== actionEpoch) return;
-    const pet = $('mainMascot');
-    setPose('idle');
-    pet.classList.remove('receive');
-    void pet.offsetWidth;
-    pet.classList.add('receive');
-    catAnimator?.play('receive');
-    poseTimer = setTimeout(() => { if (epoch === actionEpoch) {
-      pet.classList.remove('receive');
-      if (activeTransferAnimations.size) animateDelivery(0, true);
-      else { transitionPose(state.peerOnline ? 'idle' : 'nap'); scheduleNap(); scheduleIdleAction(); }
-    } }, (catAnimator?.durationFor('receive') || 1600) + 80);
-  });
+  animateRemoteAction('receive');
 }
 
 function animateRemoteAction(kind) {
-  if (panelMode) return;
-  interruptMotion();
-  const epoch = ++actionEpoch;
-  clearTimeout(poseTimer);
-  clearTimeout(napTimer);
-  clearTimeout(state.idleTimer);
-  if (kind === 'sleep') {
-    transitionPose('nest');
-    return;
-  }
-  if (kind === 'purr') {
-    transitionPose('loaf', () => {
-      if (epoch !== actionEpoch) return;
-      setPose('purr');
-      poseTimer = setTimeout(() => {
-        if (epoch === actionEpoch) transitionPose(state.peerOnline ? 'idle' : 'nap');
-      }, 3400);
+  beginAction(() => {
+    if (kind === 'sleep') return transitionPose('nest');
+    transitionPose(kind === 'purr' ? 'loaf' : kind, () => {
+      if (kind === 'purr') setPose('purr');
+      const duration = kind === 'purr' ? 3400 : (catAnimator?.durationFor(kind) || 1800) + 80;
+      poseTimer = setTimeout(finishAction, duration);
     });
-    return;
-  }
-  transitionPose(kind, () => {
-    if (epoch !== actionEpoch) return;
-    poseTimer = setTimeout(() => {
-      if (epoch === actionEpoch) transitionPose(state.peerOnline ? 'idle' : 'nap');
-    }, (catAnimator?.durationFor(kind) || 1800) + 80);
   });
 }
 
-function animateWalkFallback() {
-  if (panelMode) return;
-  onWalkState(true);
-  clearTimeout(walkFallbackTimer);
-  walkFallbackTimer = setTimeout(() => { if (state.walking) onWalkState(false); }, 1600);
-}
-
 function startMotion(kind) {
-  if (panelMode) return;
-  interruptMotion();
-  const epoch = ++actionEpoch;
-  clearTimeout(poseTimer);
-  clearTimeout(napTimer);
-  clearTimeout(state.idleTimer);
-  clearTimeout(deliveryFinishTimer);
-  wakeThen(() => {
-    if (epoch !== actionEpoch) return;
+  beginAction(async epoch => {
     const start = kind === 'walk' ? desktop?.startWalk : desktop?.startJump;
-    if (!start) {
-      if (kind === 'walk') animateWalkFallback();
-      else animateRemoteAction('jump');
-      return;
-    }
     motionPendingKind = kind;
-    Promise.resolve(start()).then(started => {
-      if (epoch !== actionEpoch) return;
-      motionPendingKind = null;
-      if (started) return;
-      if (kind === 'walk') animateWalkFallback();
-      else animateRemoteAction('jump');
-    }).catch(() => {
-      if (epoch !== actionEpoch) return;
-      motionPendingKind = null;
-      if (kind === 'walk') animateWalkFallback();
-      else animateRemoteAction('jump');
-    });
+    let started = false;
+    try { started = await start?.(); } catch {}
+    if (epoch !== actionEpoch) return;
+    motionPendingKind = null;
+    if (!started) animateRemoteAction(kind);
   });
 }
 
 function animateLocalAction(kind) {
-  if (panelMode) return;
-  clearTimeout(napTimer);
-  clearTimeout(state.idleTimer);
-  clearTimeout(poseTimer);
-  if (kind === 'walk') {
-    startMotion('walk');
-    return;
-  }
-  if (kind === 'jump') {
-    startMotion('jump');
-    return;
-  }
-  if (kind === 'wave') {
-    animatePet('wiggle');
-    return;
-  }
-  if (kind === 'care') {
-    animatePet('happy');
-    return;
-  }
-  animateRemoteAction(kind);
+  if (kind === 'walk' || kind === 'jump') return startMotion(kind);
+  animateRemoteAction({ wiggle: 'wave', care: 'happy' }[kind] || kind);
 }
 
 async function triggerAction(kind) {
@@ -594,7 +474,7 @@ async function scanPeers() {
         $('joinAddress').value = peer.address;
         results.querySelectorAll('.scan-choice').forEach(item => item.classList.remove('selected'));
         choice.classList.add('selected');
-        $('joinKey').focus();
+        $('joinForm').querySelector('button[type=submit]').focus();
       });
       results.appendChild(choice);
     }
@@ -668,10 +548,42 @@ function setQuickComposer(open) {
   if (open) {
     setActionTray(false);
     setTimeout(() => $('quickMessageInput').focus(), 0);
-  } else {
-    $('quickMessageInput').value = '';
   }
   syncMousePassThrough();
+}
+
+function clearConversation() {
+  $('events').replaceChildren();
+  seenEvents.clear(); transferStates.clear(); transferRows.clear(); activeTransferAnimations.clear();
+  $('quickMessageInput').value = '';
+  $('messageInput').value = '';
+  delete $('quickMessageForm').dataset.pendingId;
+  delete $('messageForm').dataset.pendingId;
+  clearTimeout(poseTimer);
+  if (!panelMode && state.pose === 'delivery-hold') transitionPose(state.peerOnline ? 'idle' : 'nap');
+  updateFileControls();
+}
+
+function applyRoomIdentity(session) {
+  if (!session) return;
+  if (roomIdentity && roomIdentity !== session.roomId) {
+    desktop?.forgetRoomTransfers?.(state.url);
+    clearConversation();
+  }
+  roomIdentity = session.roomId;
+  freshConnection = false;
+}
+
+function pendingFile() {
+  return [...transferStates.values()].some(item => item.roomUrl === state.url && ['uploading', 'uploaded', 'downloading'].includes(item.phase));
+}
+
+function updateFileControls() {
+  const busy = uploadStarting || pendingFile();
+  for (const id of ['quickFileButton', 'fileButton']) {
+    $(id).disabled = busy;
+    $(id).title = busy ? '等上一份文件传完再发送' : '发送文件';
+  }
 }
 
 function setActionTray(open) {
@@ -696,57 +608,25 @@ function setExpanded(expanded) {
   return resized;
 }
 
-function onWalkState(walking) {
-  if (panelMode) return;
-  if (!walking && !state.walking) return;
-  state.walking = walking;
-  clearInterval(walkFrameTimer);
-  if (!walking) $('mainMascot').classList.remove('walk-left', 'walk-right');
-  if (walking) {
+function onMotionState(kind, moving) {
+  const key = kind === 'walk' ? 'walking' : 'jumping';
+  const other = kind === 'walk' ? 'jumping' : 'walking';
+  if (panelMode || !moving && !state[key]) return;
+  state[key] = moving;
+  if (moving) {
     motionPendingKind = null;
-    ++actionEpoch;
-    state.jumping = false;
-    clearTimeout(poseTimer);
-    clearTimeout(napTimer);
-    clearTimeout(state.idleTimer);
-    clearTimeout(deliveryFinishTimer);
+    state[other] = false;
+    resetAction();
     wakeThen(() => {
-      if (!state.walking) return;
-      let frame = 1;
-      setPose('walk-1');
-      walkFrameTimer = setInterval(() => { frame = frame === 1 ? 2 : 1; setPose(`walk-${frame}`); }, 180);
-      speak('出门散步啦', 'alert');
+      if (!state[key]) return;
+      setPose(kind);
+      speak(kind === 'walk' ? '出门散步啦' : '跳起来啦', 'alert');
     });
-  } else if (state.connected && !state.jumping) {
-    transitionPose('idle');
+  } else if (!state[other]) {
+    $('mainMascot').classList.remove('walk-left');
+    finishAction();
     if (state.edgeAutoOuting) setTimeout(finishPeekOuting, 1800);
-    else { scheduleNap(); scheduleIdleAction(); schedulePeek(); }
-  }
-}
-
-function onJumpState(jumping) {
-  if (panelMode) return;
-  if (!jumping && !state.jumping) return;
-  state.jumping = jumping;
-  if (jumping) {
-    motionPendingKind = null;
-    ++actionEpoch;
-    state.walking = false;
-    clearInterval(walkFrameTimer);
-    clearTimeout(walkFallbackTimer);
-    clearTimeout(poseTimer);
-    clearTimeout(napTimer);
-    clearTimeout(state.idleTimer);
-    clearTimeout(deliveryFinishTimer);
-    wakeThen(() => {
-      if (!state.jumping) return;
-      setPose('jump');
-      speak('跳起来啦', 'alert');
-    });
-  } else if (!state.walking) {
-    clearTimeout(poseTimer);
-    transitionPose(state.connected && state.peerOnline ? 'idle' : 'nap');
-    if (state.connected) { scheduleNap(); scheduleIdleAction(); schedulePeek(); }
+    else schedulePeek();
   }
 }
 
@@ -762,30 +642,6 @@ function setView(view) {
   if (panelMode && view === 'chat') for (const item of transferStates.values()) showTransfer(item);
 }
 
-function returnFromSettings() {
-  if (panelMode) {
-    desktop?.closePanel();
-    return;
-  }
-  if (!$('appSettings').hidden) {
-    $('appSettings').hidden = true;
-    if (state.connected) {
-      $('companion').hidden = false;
-      setView('chat');
-      setExpanded(false);
-    } else {
-      $('setup').hidden = false;
-    }
-    return;
-  }
-  if (state.connected) {
-    setView('chat');
-    setExpanded(false);
-  } else {
-    $('setup').hidden = false;
-  }
-}
-
 function normalizeAddress(value) {
   const raw = value.trim();
   const url = new URL(raw.includes('://') ? raw : `http://${raw}`);
@@ -799,7 +655,7 @@ function normalizeAddress(value) {
 }
 
 async function request(route, options = {}) {
-  const headers = state.token ? { 'X-Pet-Session': state.token } : { 'X-Pet-Key': state.key };
+  const headers = state.token ? { 'X-Pet-Session': state.token } : {};
   const response = await fetch(`${state.url}/api${route}`, {
     ...options,
     signal: options.signal || AbortSignal.timeout(15000),
@@ -821,13 +677,13 @@ function applyProfile(profile = {}) {
   $('profilePetName').value = state.profile.petName || '';
 }
 
-async function openSession(url, key, name, mode) {
+async function openSession(url, name, mode, fresh = false) {
   let response;
   try {
     response = await fetch(`${url}/api/session`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Pet-Key': key },
-      body: JSON.stringify({ senderId, senderName: name, mode }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ senderId, senderName: name, mode, fresh }),
       signal: AbortSignal.timeout(4000)
     });
   } catch {
@@ -867,6 +723,7 @@ function transferLabel(item) {
 function showTransfer(item) {
   if (!item?.transferId) return;
   item = { ...item, roomUrl: item.roomUrl || state.url };
+  if (state.url && item.roomUrl !== state.url) return;
   const previous = transferStates.get(item.transferId);
   if (previous?.phase === 'saved' && item.phase !== 'saved') return;
   if (previous?.phase === 'uploaded' && item.phase === 'uploading') return;
@@ -875,6 +732,7 @@ function showTransfer(item) {
   if (previous?.fileId && ['failed', 'cancelled'].includes(previous.phase) && item.phase === 'uploaded') return;
   item = { ...previous, ...item };
   transferStates.set(item.transferId, item);
+  updateFileControls();
   while (transferStates.size > 300) {
     const oldest = transferStates.keys().next().value;
     transferStates.delete(oldest);
@@ -925,7 +783,7 @@ function showTransfer(item) {
   bar.value = item.progress;
   bar.hidden = ['saved', 'failed', 'cancelled', 'uploaded', 'waiting'].includes(item.phase);
   status.querySelector('.transfer-controls')?.remove();
-  const canCancel = item.canCancel && (item.direction === 'send' ? item.phase === 'uploading' : item.phase === 'downloading');
+  const canCancel = item.canCancel && ['uploading', 'uploaded', 'downloading'].includes(item.phase);
   const canRetry = ['failed', 'cancelled'].includes(item.phase) && (item.canRetry || item.direction === 'receive' && item.fileId);
   if (canCancel || canRetry) {
     const controls = document.createElement('div'); controls.className = 'transfer-controls';
@@ -953,7 +811,7 @@ async function downloadFile(event, automatic = false) {
     if (desktop?.saveRemoteFile) {
       const result = await desktop.saveRemoteFile({
         url: state.url, token: state.token, fileId: event.fileId,
-        fileName: event.fileName, transferId: event.transferId || event.id
+        fileName: event.fileName, transferId: event.transferId
       });
       if (result.phase !== 'saved') {
         if (result.phase !== 'cancelled') throw new Error(result.error || '文件下载失败');
@@ -961,18 +819,7 @@ async function downloadFile(event, automatic = false) {
       }
       rememberSavedFile(event.fileId);
       if (!automatic) toast(`已保存到下载：${result.savedPath.split(/[\\/]/).pop()}`);
-    } else {
-      const response = await request(`/files/${encodeURIComponent(event.fileId)}`);
-      const data = await response.arrayBuffer();
-      const blobUrl = URL.createObjectURL(new Blob([data]));
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = event.fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-    }
+    } else throw new Error('请在桌面应用中接收文件');
     return true;
   } catch (error) {
     if (automatic) {
@@ -995,7 +842,7 @@ function renderEvent(event) {
   meta.textContent = `${event.senderId === senderId ? '我' : event.senderName} · ${formatTime(event.createdAt)}`;
   wrapper.appendChild(meta);
   if (event.kind === 'file') {
-    const transferId = event.transferId || event.id;
+    const transferId = event.transferId;
     if (panelMode) {
       const earlier = transferRows.get(transferId);
       if (earlier) earlier.remove();
@@ -1051,25 +898,6 @@ function onEvent(event) {
   seenEvents.add(event.id);
   while (seenEvents.size > 2000) seenEvents.delete(seenEvents.values().next().value);
   if (event.senderId !== senderId && !panelMode) unpeek(true);
-  if (event.kind === 'delivery') {
-    const data = event.data || {};
-    if (panelKind === 'chat' && data.type === 'file') showTransfer({
-      transferId: data.transferId, name: data.name,
-      direction: event.senderId === senderId ? 'send' : 'receive',
-      phase: 'uploading', progress: Number(data.progress) || 0
-    });
-    if (panelMode) return;
-    if (event.senderId !== senderId) {
-      if (!pendingDeliveries.has(data.transferId)) {
-        pendingDeliveries.set(data.transferId, Date.now());
-        setTimeout(() => pendingDeliveries.delete(data.transferId), 30000);
-        animateDelivery(0);
-        speak(`${event.senderName} 正在递信`);
-      }
-      $('mainMascot').style.setProperty('--delivery-progress', String(Math.max(0, Math.min(1, Number(data.progress) / 100 || 0))));
-    }
-    return;
-  }
   $('events').querySelector('.empty-state')?.remove();
   renderEvent(event);
   // The mascot window owns animations and notifications. A history panel only
@@ -1077,19 +905,11 @@ function onEvent(event) {
   if (panelMode) return;
   if (event.kind === 'file') receiveFile(event);
   const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
-  if (event.kind === 'walk') startMotion('walk');
-  else if (event.kind === 'jump') startMotion('jump');
-  else if (event.kind === 'wave') animatePet('wiggle');
-  else if (actionText[event.kind]) animateRemoteAction(event.kind);
+  if (event.kind === 'wave' || actionText[event.kind]) animateLocalAction(event.kind);
   if (event.senderId !== senderId) {
     const message = event.kind === 'file' ? `收到文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 来打招呼啦` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : event.text;
     speak(message, actionText[event.kind] ? 'alert' : 'normal');
-    if (event.kind === 'message') {
-      const transferId = event.transferId;
-      const started = transferId ? pendingDeliveries.get(transferId) : null;
-      if (transferId) pendingDeliveries.delete(transferId);
-      setTimeout(animateReceive, started ? Math.max(0, 650 - (Date.now() - started)) : 0);
-    }
+    if (event.kind === 'message') animateReceive();
     if (desktop && state.notifications) desktop.notify(state.profile.petName || DEFAULT_PET_NAME, event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
   }
   if (event.kind === 'message' && event.senderId === senderId) animateDelivery(1);
@@ -1099,7 +919,7 @@ function openSocket() {
   if (!state.connected || !state.token) return;
   clearTimeout(socketConnectTimer);
   const epoch = connectionEpoch;
-  const socket = new WebSocket(`${state.url.replace(/^http/, 'ws')}/ws?v=3&session=${encodeURIComponent(state.token)}`);
+  const socket = new WebSocket(`${state.url.replace(/^http/, 'ws')}/ws?v=4&session=${encodeURIComponent(state.token)}`);
   state.socket = socket;
   socketConnectTimer = setTimeout(() => {
     if (state.socket === socket && socket.readyState === WebSocket.CONNECTING) socket.close();
@@ -1131,6 +951,11 @@ function openSocket() {
     if (payload.type === 'presence') setPeerOnline(payload);
     if (payload.type === 'profile') applyProfile(payload.profile);
     if (payload.type === 'transfer') onTransfer(payload.transfer);
+    if (payload.type === 'reset') {
+      roomIdentity = payload.roomId || '';
+      desktop?.forgetRoomTransfers?.(state.url);
+      clearConversation();
+    }
   };
   socket.onclose = () => {
     if (!state.connected || state.socket !== socket) return;
@@ -1144,7 +969,7 @@ function openSocket() {
 }
 
 function persistSession() {
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ url: state.url, key: state.key, name: state.name, mode: state.mode }));
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ url: state.url, name: state.name, mode: state.mode }));
 }
 
 async function ensureHostStarted(epoch) {
@@ -1159,9 +984,7 @@ async function ensureHostStarted(epoch) {
   state.hostStarted = true;
   hostNeedsStart = false;
   state.url = result.url;
-  state.key = result.key;
   $('roomAddress').textContent = state.url;
-  $('roomKey').textContent = state.key;
   if (state.connected) persistSession();
 }
 
@@ -1177,9 +1000,10 @@ function scheduleSessionRetry(delay) {
     try {
       await ensureHostStarted(epoch);
       if (!state.connected || epoch !== connectionEpoch) return;
-      const session = await openSession(state.url, state.key, state.name, state.mode);
+      const session = await openSession(state.url, state.name, state.mode, freshConnection);
       if (!state.connected || epoch !== connectionEpoch) return;
       state.token = session.token;
+      applyRoomIdentity(session);
       if (!panelMode) desktop?.setTransferSession?.(state.url, state.token);
       state.roomConnection = 'connecting';
       state.profile = session.profile || {};
@@ -1212,8 +1036,9 @@ function recoverConnection(force = false) {
   scheduleSessionRetry(0);
 }
 
-async function connect(url, key, name, mode, { restoreHost = false } = {}) {
+async function connect(url, name, mode, { restoreHost = false } = {}) {
   const normalized = normalizeAddress(url);
+  const oldUrl = state.url || JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')?.url;
   const epoch = ++connectionEpoch;
   clearTimeout(state.reconnectTimer);
   clearTimeout(socketConnectTimer);
@@ -1225,17 +1050,23 @@ async function connect(url, key, name, mode, { restoreHost = false } = {}) {
   offlineNapDeadline = 0;
   hostNeedsStart = restoreHost && !panelMode;
   state.url = normalized;
-  state.key = key.trim();
+  freshConnection = oldUrl !== normalized && !panelMode;
+  if (oldUrl !== normalized) {
+    if (oldUrl) desktop?.forgetRoomTransfers?.(oldUrl);
+    clearConversation();
+    roomIdentity = '';
+  }
   state.name = name.trim().slice(0, 24);
   state.mode = mode;
   let session = null;
   try {
     await ensureHostStarted(epoch);
     if (epoch !== connectionEpoch) return;
-    session = await openSession(state.url, state.key, state.name, mode);
+    session = await openSession(state.url, state.name, mode, freshConnection);
   } catch (error) { if (!window.ConnectionPolicy.shouldRetry(error)) throw error; }
   if (epoch !== connectionEpoch) return;
   state.token = session?.token || '';
+  applyRoomIdentity(session);
   if (!panelMode && state.token) desktop?.setTransferSession?.(state.url, state.token);
   state.profile = session?.profile || {};
   let events = [];
@@ -1248,22 +1079,19 @@ async function connect(url, key, name, mode, { restoreHost = false } = {}) {
   state.roomConnection = session ? 'connecting' : 'reconnecting';
   $('setup').hidden = true;
   $('companion').hidden = false;
-  $('pinButton').hidden = !desktop;
   $('settingsButton').hidden = true;
   $('roomAddress').textContent = state.url;
-  $('roomKey').textContent = state.key;
-  $('hostKeyBlock').hidden = mode !== 'host';
   $('events').replaceChildren();
   transferRows.clear();
   seenEvents.clear();
-  const visibleEvents = events.filter(event => event.kind !== 'delivery');
+  const visibleEvents = events;
   if (visibleEvents.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'empty-state';
     empty.textContent = '这里还没有消息';
     $('events').appendChild(empty);
   } else {
-    events.forEach(event => { seenEvents.add(event.id); if (event.kind !== 'delivery') renderEvent(event); });
+    visibleEvents.forEach(event => { seenEvents.add(event.id); renderEvent(event); });
     $('speech').textContent = '';
   }
   if (panelKind === 'chat') for (const transfer of transferStates.values()) showTransfer(transfer);
@@ -1278,7 +1106,7 @@ async function connect(url, key, name, mode, { restoreHost = false } = {}) {
     setView(panelKind === 'settings' ? 'connection' : 'chat');
   } else {
     setView('chat');
-    setExpanded(!desktop);
+    setExpanded(false);
   }
   updateConnectionStatus();
   startCatActivity();
@@ -1299,7 +1127,6 @@ async function disconnect() {
   state.roomConnection = 'closed';
   if (!panelMode && state.walking) desktop?.stopWalk();
   if (!panelMode && state.jumping) desktop?.stopJump();
-  clearInterval(walkFrameTimer);
   clearTimeout(poseTimer);
   clearTimeout(napTimer);
   clearInterval(blinkTimer);
@@ -1329,7 +1156,6 @@ async function disconnect() {
   $('setup').hidden = false;
   $('appSettings').hidden = true;
   $('window').classList.remove('compact');
-  $('pinButton').hidden = true;
   $('settingsButton').hidden = false;
   state.peerOnline = false;
   updateConnectionStatus();
@@ -1337,11 +1163,11 @@ async function disconnect() {
   if (panelMode) desktop?.closePanel();
 }
 
-async function sendEvent(kind, text = '', data = {}, { quiet = false, signal, clientId = crypto.randomUUID() } = {}) {
+async function sendEvent(kind, text = '', { clientId = crypto.randomUUID() } = {}) {
   try {
     const response = await request('/events', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-      body: JSON.stringify({ kind, text, data, clientId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, text, clientId })
     });
     if (kind === 'wave') {
       speak('招手送出去了');
@@ -1349,12 +1175,12 @@ async function sendEvent(kind, text = '', data = {}, { quiet = false, signal, cl
     else if (kind === 'jump') speak('已经让对方乱蹦啦', 'alert');
     else if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(kind)) speak('动作送到对方那里啦', 'alert');
     return await response.json();
-  } catch (error) { if (!quiet) toast(error.message); return null; }
+  } catch (error) { toast(error.message); return null; }
 }
 
 async function sendMessage(text, clientId) {
   animateDelivery(0);
-  const sent = await sendEvent('message', text, {}, { clientId });
+  const sent = await sendEvent('message', text, { clientId });
   if (!sent) return false;
   $('mainMascot').style.setProperty('--delivery-progress', '1');
   speak('信已寄出', 'alert');
@@ -1387,21 +1213,23 @@ async function submitMessage(form, input) {
 
 async function sendFile(file) {
   if (!file) return;
+  if (uploadStarting || pendingFile()) return toast('上一份文件还没有传完');
   if (file.size > 100 * 1024 * 1024) return toast('文件不能超过 100 MB');
   if (!state.connected || !state.token) return toast('房间恢复连接后再发送文件');
   if (!desktop?.uploadFile) return toast('请在桌面应用中发送文件');
+  uploadStarting = true; updateFileControls();
   try {
     const transfer = await desktop.uploadFile(file, { url: state.url, token: state.token,
-      transferId: crypto.randomUUID(), clientId: crypto.randomUUID() });
+      transferId: crypto.randomUUID() });
     showTransfer(transfer);
   } catch (error) { toast(error.message); }
-  $('fileInput').value = '';
+  finally { uploadStarting = false; $('fileInput').value = ''; updateFileControls(); }
 }
 
 function cancelRoomTransfers(url) {
   activeTransferAnimations.clear();
-  pendingDeliveries.clear();
   desktop?.cancelRoomTransfers?.(url);
+  updateFileControls();
 }
 
 async function transferAction(item, action) {
@@ -1429,11 +1257,11 @@ function onTransfer(item) {
     item = { ...item, phase: 'saved', progress: 100 };
   }
   showTransfer({ ...item, roomUrl: state.url, direction: item.senderId === senderId ? 'send' : 'receive' });
+  if (!panelMode) desktop?.updateTransfer?.(state.url, item);
 }
 
 async function copy(value) {
-  if (desktop) await desktop.copy(value);
-  else await navigator.clipboard.writeText(value);
+  await desktop.copy(value);
   toast('已复制');
 }
 
@@ -1461,29 +1289,8 @@ async function init() {
   $('joinTab').addEventListener('click', () => { setMode('join'); scanPeers(); });
   $('scanPeersButton').addEventListener('click', scanPeers);
   $('joinAddress').addEventListener('input', () => $('scanResults').querySelectorAll('.scan-choice').forEach(item => item.classList.remove('selected')));
-  $('closeButton').addEventListener('click', () => {
-    if (panelMode) {
-      desktop?.closePanel();
-      return;
-    }
-    if (!$('appSettings').hidden || (state.connected && state.expanded)) {
-      returnFromSettings();
-      return;
-    }
-    desktop?.close();
-  });
-  $('settingsButton').addEventListener('click', () => {
-    if (desktop?.openPanel) {
-      desktop.openPanel('settings');
-      return;
-    }
-    if (state.connected) { setExpanded(true); setView('connection'); return; }
-    placePreferences();
-    $('setup').hidden = true;
-    $('appSettings').hidden = false;
-    desktop?.setWindowSize(true);
-  });
-  $('settingsBackButton').addEventListener('click', returnFromSettings);
+  $('closeButton').addEventListener('click', () => panelMode ? desktop.closePanel() : desktop.close());
+  $('settingsButton').addEventListener('click', () => desktop.openPanel('settings'));
   $('idleActionsToggle').checked = state.idleActions;
   $('edgeHideToggle').checked = state.edgeHideEnabled;
   $('desktopNotificationsToggle').checked = state.notifications;
@@ -1515,20 +1322,14 @@ async function init() {
     if (event.key === SESSION_KEY && !event.newValue && state.connected) disconnect();
     if (event.key === SESSION_KEY && event.newValue && panelMode) {
       const saved = JSON.parse(event.newValue);
-      if (saved.url !== state.url || saved.key !== state.key) {
-        connect(saved.url, saved.key, saved.name, saved.mode).catch(error => toast(error.message));
+      if (saved.url !== state.url) {
+        connect(saved.url, saved.name, saved.mode).catch(error => toast(error.message));
       }
     }
   });
   $('desktopNotificationsToggle').addEventListener('change', event => {
     state.notifications = event.target.checked;
     localStorage.setItem('dongdong-notifications', JSON.stringify(state.notifications));
-  });
-  $('pinButton').addEventListener('click', async () => {
-    state.pinned = !state.pinned;
-    await desktop?.setPinned(state.pinned);
-    $('pinButton').title = state.pinned ? '取消置顶' : '保持置顶';
-    $('pinButton').classList.toggle('unpinned', !state.pinned);
   });
   $('mascotButton').addEventListener('click', () => {
     if (mascotDrag.suppressClick) { mascotDrag.suppressClick = false; return; }
@@ -1595,8 +1396,7 @@ async function init() {
   $('contextSettings').addEventListener('click', () => {
     $('contextMenu').hidden = true;
     syncMousePassThrough();
-    if (desktop?.openPanel) desktop.openPanel('settings');
-    else { setExpanded(true); setView('connection'); }
+    desktop.openPanel('settings');
   });
   $('mascotButton').addEventListener('mouseenter', unpeek);
   $('mascotButton').addEventListener('focus', unpeek);
@@ -1619,23 +1419,16 @@ async function init() {
     setActionTray(false);
     triggerAction(button.dataset.action);
   }));
-  if (!panelMode && desktop) desktop.onWalkState(onWalkState);
+  if (!panelMode && desktop) desktop.onWalkState(walking => onMotionState('walk', walking));
   if (!panelMode && desktop?.onWalkDirection) desktop.onWalkDirection(direction => {
     $('mainMascot').classList.toggle('walk-left', direction < 0);
-    $('mainMascot').classList.toggle('walk-right', direction > 0);
   });
-  if (!panelMode && desktop?.onJumpState) desktop.onJumpState(onJumpState);
+  if (!panelMode && desktop?.onJumpState) desktop.onJumpState(jumping => onMotionState('jump', jumping));
   if (!panelMode && desktop?.onPeekState) desktop.onPeekState(peeked => {
     state.peeked = Boolean(peeked);
     $('window').classList.toggle('peeked', state.peeked);
   });
-  if (desktop?.onMenuAction) desktop.onMenuAction(action => {
-    if (action === 'settings') {
-      if (desktop?.openPanel) desktop.openPanel('settings');
-      else { setExpanded(true); setView('connection'); }
-    }
-    if (action === 'show') setExpanded(state.connected ? state.expanded : true);
-  });
+  desktop.onMenuAction(action => { if (action === 'show') setExpanded(!state.connected); });
   $('openButton').addEventListener('click', () => {
     // Keep the live message flow beside the cat. The full conversation is a
     // separate panel, so this action never resizes or hides the mascot.
@@ -1652,13 +1445,11 @@ async function init() {
   });
   $('quickMessageInput').addEventListener('input', () => { delete $('quickMessageForm').dataset.pendingId; });
   $('messageInput').addEventListener('input', () => { delete $('messageForm').dataset.pendingId; });
-  $('collapseButton').addEventListener('click', returnFromSettings);
   $('chatTab').addEventListener('click', () => setView('chat'));
   $('connectionTab').addEventListener('click', () => setView('connection'));
   $('disconnectButton').addEventListener('click', disconnect);
   $('openDownloadsButton').addEventListener('click', () => desktop?.openDownloads());
   $('copyAddress').addEventListener('click', () => copy(state.url));
-  $('copyKey').addEventListener('click', () => copy(state.key));
   $('saveProfileButton').addEventListener('click', async () => {
     try {
       const response = await request('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ petName: $('profilePetName').value.trim() }) });
@@ -1683,7 +1474,7 @@ async function init() {
     if (state.connected) sendFile(event.dataTransfer.files[0]);
   });
 
-  const addresses = desktop ? await desktop.addresses() : [];
+  const addresses = await desktop.addresses();
   $('hostAddress').replaceChildren();
   if (addresses.length) {
     for (const item of addresses) {
@@ -1694,7 +1485,7 @@ async function init() {
     }
   } else {
     const option = document.createElement('option');
-    option.textContent = desktop ? '未检测到 Tailscale 地址' : '请在桌面应用中创建房间';
+    option.textContent = '未检测到 Tailscale 地址';
     option.value = '';
     $('hostAddress').appendChild(option);
     $('hostForm').querySelector('button[type=submit]').disabled = true;
@@ -1706,45 +1497,40 @@ async function init() {
     try {
       const result = await desktop.startHost($('hostAddress').value, senderId);
       state.hostStarted = true;
-      await connect(result.url, result.key, $('hostName').value, 'host');
+      await connect(result.url, $('hostName').value, 'host');
     } catch (error) { $('setupFeedback').textContent = error.message; }
   });
   $('joinForm').addEventListener('submit', async event => {
     event.preventDefault();
     $('setupFeedback').textContent = '';
-    try { await connect($('joinAddress').value, $('joinKey').value, $('joinName').value, 'join'); }
+    try { await connect($('joinAddress').value, $('joinName').value, 'join'); }
     catch (error) { $('setupFeedback').textContent = error.message; }
   });
 
-  if (desktop) {
-    setAutoLaunchToggles(await desktop.getAutoLaunch());
-    const updateAutoLaunch = async event => {
-      try {
-        const value = await desktop.setAutoLaunch(event.target.checked);
-        setAutoLaunchToggles(value);
-        localStorage.setItem('dongdong-auto-launch', JSON.stringify(value));
-        toast(event.target.checked ? '已开启开机自启动' : '已关闭开机自启动');
-      } catch (error) {
-        setAutoLaunchToggles(!event.target.checked);
-        toast(error.message);
-      }
-    };
-    $('autoLaunchSetup').addEventListener('change', updateAutoLaunch);
-  } else {
-    $('autoLaunchSetup').disabled = true;
-  }
+  setAutoLaunchToggles(await desktop.getAutoLaunch());
+  const updateAutoLaunch = async event => {
+    try {
+      const value = await desktop.setAutoLaunch(event.target.checked);
+      setAutoLaunchToggles(value);
+      localStorage.setItem('dongdong-auto-launch', JSON.stringify(value));
+      toast(event.target.checked ? '已开启开机自启动' : '已关闭开机自启动');
+    } catch (error) {
+      setAutoLaunchToggles(!event.target.checked);
+      toast(error.message);
+    }
+  };
+  $('autoLaunchSetup').addEventListener('change', updateAutoLaunch);
 
   const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
   if (new URLSearchParams(location.search).has('preview')) {
-    await connect('127.0.0.1:4827', 'preview-only', '我', 'host');
+    await connect('127.0.0.1:4827', '我', 'host');
   } else if (saved) {
     $('hostName').value = saved.name;
     $('joinName').value = saved.name;
     $('joinAddress').value = saved.url;
-    $('joinKey').value = saved.key;
     setMode(saved.mode);
     try {
-      await connect(saved.url, saved.key, saved.name, saved.mode, { restoreHost: saved.mode === 'host' && Boolean(desktop) && !panelMode });
+      await connect(saved.url, saved.name, saved.mode, { restoreHost: saved.mode === 'host' && Boolean(desktop) && !panelMode });
     } catch (error) { $('setupFeedback').textContent = error.message; }
   }
 }

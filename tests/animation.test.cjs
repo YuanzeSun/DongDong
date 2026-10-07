@@ -16,7 +16,6 @@ test('sleep wakes before standing, and walk changes leg positions', () => {
   assert.equal(sample('wake', 0).sleepArt, true);
   assert.equal(sample('wake', ACTIONS.wake.frames - 1).sleepArt, undefined);
   assert.notDeepEqual(sample('walk', 0), sample('walk', Math.floor(ACTIONS.walk.frames / 2)));
-  assert.equal(normalize('walk-2'), 'walk');
   assert.equal(normalize('nap'), 'sleep');
 });
 
