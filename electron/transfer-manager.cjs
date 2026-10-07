@@ -158,11 +158,11 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
     job.cancelRequested = false;
     job.serverPhase = '';
     const signal = AbortSignal.any([job.controller.signal, AbortSignal.timeout(totalTimeoutMs)]);
-    let reserved = false;
+    job.reserved = false;
     const promise = (async () => {
       try {
         await publish(job, job.direction === 'send' ? 'uploading' : 'downloading', 0, true);
-        reserved = true;
+        job.reserved = true;
         signal.throwIfAborted();
         let lastProgress = -1;
         const progress = value => {
@@ -195,7 +195,7 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
         job.error = cancelled ? '已取消' : signal.aborted ? '传输超时，可重试' : error.message;
         if (terminalPhases.has(job.serverPhase)) { job.error = job.serverError || ''; localUpdate(job, job.serverPhase); }
         // A lost reservation response may already have occupied the room's slot.
-        else if (reserved || !error.status || error.status >= 500) await publish(job, cancelled ? 'cancelled' : 'failed');
+        else if (job.reserved || !error.status || error.status >= 500) await publish(job, cancelled ? 'cancelled' : 'failed');
         else localUpdate(job, cancelled ? 'cancelled' : 'failed');
       } finally {
         job.controller = null;
@@ -234,13 +234,21 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
     } else return false;
     return true;
   }
+  function download(details) {
+    const origin = roomOrigin(details.url);
+    const pending = [...jobs.values()].find(job => job.roomUrl === origin && job.direction === 'send' && job.controller && !job.reserved);
+    // The peer's file can arrive before our competing send receives its rejection.
+    if (pending) return pending.promise.then(() => {
+      if (closed || pending.forgotten) throw new Error('文件接收已停止');
+      return download(details);
+    });
+    const job = start(details, 'receive');
+    if (!job.controller && !job.pendingReceipt && job.phase === 'failed') { job.token = String(roomSessions.get(job.roomUrl) || details.token || job.token); return run(job); }
+    return job.promise;
+  }
   return {
     upload: details => publicJob(start(details, 'send')),
-    download: details => {
-      const job = start(details, 'receive');
-      if (!job.controller && !job.pendingReceipt && job.phase === 'failed') { job.token = String(roomSessions.get(job.roomUrl) || details.token || job.token); return run(job); }
-      return job.promise;
-    },
+    download,
     retry: details => {
       const job = jobs.get(keyFor(roomOrigin(details.url), details.transferId));
       if (!job) throw new Error('请重新选择文件');

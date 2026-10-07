@@ -359,6 +359,66 @@ test('a rejected reservation never uploads file bytes', async () => {
   } finally { manager.close(); await fake.close(); temp.clean(); }
 });
 
+for (const leave of [false, true]) test(leave
+  ? 'leaving while a competing send is rejected prevents a late automatic download'
+  : 'an incoming file waits for a competing send rejection and saves automatically', async () => {
+  const temp = scratch(); const ctx = await startRoom(temp.root);
+  let releaseUpload; let releaseRejection; let downloadRequests = 0; let guestUploads = 0;
+  const proxy = await localServer((req, res) => {
+    const guest = req.headers['x-pet-session'] === ctx.guest.token;
+    if (req.url.startsWith('/api/files/')) downloadRequests++;
+    if (req.url === '/api/files' && guest) guestUploads++;
+    const upstream = http.request(`${ctx.url}${req.url}`, { method: req.method, headers: req.headers }, reply => {
+      if (reply.statusCode === 409 && guest) {
+        const chunks = []; reply.on('data', chunk => chunks.push(chunk));
+        reply.on('end', () => { releaseRejection = () => { res.writeHead(reply.statusCode, reply.headers); res.end(Buffer.concat(chunks)); }; });
+      } else { res.writeHead(reply.statusCode, reply.headers); reply.pipe(res); }
+    });
+    upstream.on('error', () => res.destroy());
+    if (req.url === '/api/files' && !guest) releaseUpload = () => req.pipe(upstream);
+    else req.pipe(upstream);
+  });
+  const sender = createTransferManager({ downloadsPath: () => temp.downloads, onProgress() {} });
+  const receiver = createTransferManager({ downloadsPath: () => temp.downloads, onProgress() {} });
+  const socket = new WebSocket(`${ctx.url.replace('http:', 'ws:')}/ws?v=4&session=${ctx.guest.token}`);
+  const incoming = new Promise(resolve => socket.on('message', raw => {
+    const message = JSON.parse(raw);
+    if (message.type === 'event' && message.event.kind === 'file') resolve(message.event);
+  }));
+  try {
+    await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+    const source = path.join(temp.root, 'together.txt'); fs.writeFileSync(source, 'arrives automatically');
+    sender.upload({ url: proxy.url, token: ctx.host.token, path: source, transferId: 'winner' });
+    await until(() => releaseUpload);
+    receiver.upload({ url: proxy.url, token: ctx.guest.token, path: source, transferId: 'rejected' });
+    await until(() => releaseRejection);
+    releaseUpload();
+    const event = await incoming;
+    assert.equal(receiver.snapshot()[0].phase, 'uploading', 'rejection is still in transit');
+    const result = Promise.resolve().then(() => receiver.download({ url: proxy.url, token: ctx.guest.token, ...event }))
+      .then(value => ({ value }), error => ({ error }));
+    await Promise.resolve();
+    if (leave) receiver.forgetRoom(proxy.url);
+    releaseRejection();
+    const outcome = await result;
+    if (leave) {
+      assert.match(outcome.error?.message || '', /接收已停止/);
+      assert.deepEqual(receiver.snapshot(), []);
+      assert.equal(downloadRequests, 0);
+      assert.deepEqual(fs.readdirSync(temp.downloads), []);
+    } else {
+      assert.ifError(outcome.error);
+      assert.equal(outcome.value.phase, 'saved');
+      assert.equal(fs.readFileSync(outcome.value.savedPath, 'utf8'), 'arrives automatically');
+      assert.equal(downloadRequests, 1);
+      const records = await (await fetch(`${ctx.url}/api/transfers`, { headers: { 'X-Pet-Session': ctx.host.token } })).json();
+      assert.equal(records.find(item => item.transferId === 'winner').phase, 'saved');
+      assert.equal(receiver.snapshot().find(item => item.transferId === 'rejected').phase, 'failed');
+    }
+    assert.equal(guestUploads, 0, 'the rejected send never uploads a second file');
+  } finally { socket.terminate(); sender.close(); receiver.close(); await proxy.close(); await ctx.room.close(); temp.clean(); }
+});
+
 test('saved receipts retry HTTP errors and renew their session without downloading twice', async () => {
   const temp = scratch(); let savedAttempts = 0; let downloads = 0; const receipts = [];
   const fake = await localServer((req, res) => {
