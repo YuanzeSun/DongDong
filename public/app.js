@@ -32,6 +32,7 @@ let stanceTimer;
 let voiceTimer;
 let actionEpoch = 0;
 let motionPendingKind = null;
+let automaticMotion = false;
 let peekTimer;
 let peekOutingTimer;
 let edgeHoldTimer;
@@ -56,17 +57,33 @@ const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, 
 
 if (panelMode) document.body.classList.add('panel-mode');
 
+function clearSpeech() {
+  clearTimeout(speak.timer);
+  $('speech').classList.remove('speech-pop', 'speech-alert', 'speech-message');
+  $('speech').textContent = '';
+  syncMousePassThrough();
+}
+
+function scheduleSpeechDismiss() {
+  clearTimeout(speak.timer);
+  const bubble = $('speech');
+  if (!bubble.textContent || bubble.classList.contains('speech-message') && bubble.matches(':hover')) return;
+  speak.timer = setTimeout(clearSpeech, speak.duration);
+}
+
 function speak(message, kind = 'normal') {
   if (panelMode) return;
-  $('speech').textContent = message;
-  $('speech').classList.remove('speech-pop', 'speech-alert');
-  void $('speech').offsetWidth;
-  $('speech').classList.add(kind === 'alert' ? 'speech-alert' : 'speech-pop');
-  clearTimeout(speak.timer);
-  speak.timer = setTimeout(() => {
-    $('speech').classList.remove('speech-pop', 'speech-alert');
-    $('speech').textContent = '';
-  }, 1800);
+  const bubble = $('speech');
+  if (kind !== 'message' && bubble.classList.contains('speech-message')) return;
+  clearSpeech();
+  bubble.textContent = message;
+  bubble.scrollTop = 0;
+  bubble.classList.toggle('speech-message', kind === 'message');
+  void bubble.offsetWidth;
+  bubble.classList.add(kind === 'alert' ? 'speech-alert' : 'speech-pop');
+  speak.duration = kind === 'message' ? Math.min(12000, Math.max(4500, message.length * 110)) : 1800;
+  scheduleSpeechDismiss();
+  syncMousePassThrough();
 }
 
 const ACTION_VOICES = {
@@ -168,6 +185,7 @@ function transitionPose(pose, onReady = () => {}) {
 
 function interruptMotion() {
   if (panelMode) return;
+  automaticMotion = false;
   const wasWalking = state.walking;
   const wasJumping = state.jumping;
   const pending = motionPendingKind;
@@ -196,9 +214,9 @@ function scheduleNap() {
 function schedulePeek() {
   if (panelMode) return;
   clearTimeout(peekTimer);
-  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return;
+  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting || catInteractionOpen()) return;
   peekTimer = setTimeout(() => {
-    if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting) return schedulePeek();
+    if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting || catInteractionOpen()) return schedulePeek();
     state.peeked = true;
     clearTimeout(state.idleTimer);
     $('window').classList.add('peeked');
@@ -223,9 +241,9 @@ function setEdgeHide(enabled) {
 function schedulePeekOuting() {
   if (panelMode) return;
   clearTimeout(peekOutingTimer);
-  if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold) return;
+  if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold || catInteractionOpen()) return;
   peekOutingTimer = setTimeout(() => {
-    if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold) return;
+    if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold || catInteractionOpen()) return;
     state.edgeAutoOuting = true;
     state.peeked = false;
     $('window').classList.remove('peeked');
@@ -233,7 +251,7 @@ function schedulePeekOuting() {
     const outings = desktop ? ['walk', 'sit', 'stretch', 'nap', 'happy'] : ['sit', 'stretch', 'nap', 'happy'];
     const outing = outings[Math.floor(Math.random() * outings.length)];
     if (outing === 'walk' && desktop) {
-      startMotion('walk');
+      startMotion('walk', true);
     }
     else {
       setPose(outing);
@@ -246,7 +264,7 @@ function finishPeekOuting() {
   if (panelMode) return;
   if (!state.edgeAutoOuting) return;
   state.edgeAutoOuting = false;
-  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.edgeHold) return;
+  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.edgeHold || catInteractionOpen()) return;
   state.peeked = true;
   clearTimeout(state.idleTimer);
   $('window').classList.add('peeked');
@@ -280,9 +298,9 @@ function unpeek(userInitiated = false) {
 function scheduleIdleAction() {
   if (panelMode) return;
   clearTimeout(state.idleTimer);
-  if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || !state.idleActions) return;
+  if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || !state.idleActions || catInteractionOpen()) return;
   state.idleTimer = setTimeout(() => {
-    if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || state.edgeAutoOuting || !['idle', 'loaf', 'nest'].includes(state.pose)) return scheduleIdleAction();
+    if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || state.edgeAutoOuting || catInteractionOpen() || !['idle', 'loaf', 'nest'].includes(state.pose)) return scheduleIdleAction();
     const choices = state.pose === 'idle'
       ? ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'loaf', 'nest']
       : ['idle', 'sit', 'stretch', state.pose === 'loaf' ? 'nest' : 'loaf'];
@@ -292,7 +310,7 @@ function scheduleIdleAction() {
       setPose('blink');
       setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, catAnimator?.durationFor('blink') || 260);
     } else if (action === 'walk' && desktop) {
-      startMotion('walk');
+      startMotion('walk', true);
     } else if (['idle', 'loaf', 'nest'].includes(action)) {
       transitionPose(action);
     } else if (['sit', 'stretch'].includes(action)) {
@@ -391,7 +409,8 @@ function animateRemoteAction(kind) {
   });
 }
 
-function startMotion(kind) {
+function startMotion(kind, automatic = false) {
+  if (panelMode) return;
   beginAction(async epoch => {
     const start = kind === 'walk' ? desktop?.startWalk : desktop?.startJump;
     motionPendingKind = kind;
@@ -401,6 +420,7 @@ function startMotion(kind) {
     motionPendingKind = null;
     if (!started) state.edgeAutoOuting ? finishPeekOuting() : animateRemoteAction(kind);
   });
+  automaticMotion = automatic;
 }
 
 function animateLocalAction(kind) {
@@ -529,6 +549,7 @@ function syncMousePassThrough() {
   if (!desktop?.setIgnoreMouseEvents || panelMode) return;
   const compact = state.connected && $('window').classList.contains('compact');
   const cat = compact && overVisibleCat(lastPointer);
+  const speech = compact && $('speech').classList.contains('speech-message') && insideRect(lastPointer, $('speech'));
   const keyboardRevealed = compact && $('mascotButton').matches(':focus-visible');
   const actions = compact && !$('compactActions').hidden && insideRect(lastPointer, $('compactActions'))
     && (actionsHoverUntil > Date.now() || keyboardRevealed);
@@ -550,7 +571,7 @@ function syncMousePassThrough() {
       // Keep the short path below the cat interactive while the toolbar lingers.
       const bridge = held && lastPointer.x >= mascotRect.left - 8 && lastPointer.x <= mascotRect.right + 8
         && lastPointer.y >= mascotRect.bottom - 8 && lastPointer.y <= actionsRect.top;
-      interactive = cat || actions || bridge;
+      interactive = cat || speech || actions || bridge;
     }
   }
   const nextIgnored = !interactive;
@@ -559,9 +580,28 @@ function syncMousePassThrough() {
   desktop.setIgnoreMouseEvents(nextIgnored, { forward: true }).catch(() => { ignoringMouse = !nextIgnored; });
 }
 
+function catInteractionOpen() {
+  return !$('quickMessageForm').hidden || !$('actionTray').hidden;
+}
+
+function updateIdleForInteraction() {
+  if (panelMode) return;
+  if (catInteractionOpen()) {
+    clearTimeout(state.idleTimer);
+    clearTimeout(peekTimer);
+    clearTimeout(peekOutingTimer);
+    if (state.peeked || state.edgeAutoOuting) unpeek(true);
+    if (automaticMotion) beginAction(finishAction);
+  } else {
+    scheduleIdleAction();
+    schedulePeek();
+  }
+}
+
 function setQuickComposer(open) {
   const form = $('quickMessageForm');
   if (!form) return;
+  const changed = form.hidden === open;
   if (!open && !form.hidden) actionsHoverUntil = Date.now() + ACTIONS_LINGER_MS;
   form.hidden = !open;
   $('window').classList.toggle('quick-composing', open);
@@ -569,10 +609,12 @@ function setQuickComposer(open) {
     setActionTray(false);
     setTimeout(() => $('quickMessageInput').focus(), 0);
   }
+  if (changed) updateIdleForInteraction();
   syncMousePassThrough();
 }
 
 function clearConversation() {
+  clearSpeech();
   $('events').replaceChildren();
   seenEvents.clear(); transferStates.clear(); transferRows.clear(); activeTransferAnimations.clear();
   $('quickMessageInput').value = '';
@@ -606,9 +648,11 @@ function updateFileControls() {
 }
 
 function setActionTray(open) {
+  const changed = $('actionTray').hidden === open;
   if (!open && !$('actionTray').hidden) actionsHoverUntil = Date.now() + ACTIONS_LINGER_MS;
   $('actionTray').hidden = !open;
   $('actionMenuButton').setAttribute('aria-expanded', String(open));
+  if (changed) updateIdleForInteraction();
   syncMousePassThrough();
 }
 
@@ -642,6 +686,7 @@ function onMotionState(kind, moving) {
       speak(kind === 'walk' ? '出门散步啦' : '跳起来啦', 'alert');
     });
   } else if (!state[other]) {
+    automaticMotion = false;
     $('mainMascot').classList.remove('walk-left');
     finishAction();
     if (state.edgeAutoOuting) setTimeout(finishPeekOuting, 1800);
@@ -931,7 +976,7 @@ function onEvent(event) {
   if (event.kind === 'wave' || actionText[event.kind]) animateLocalAction(event.kind);
   if (event.senderId !== senderId) {
     const message = event.kind === 'file' ? `收到文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 来打招呼啦` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : event.text;
-    speak(message, actionText[event.kind] ? 'alert' : 'normal');
+    speak(message, event.kind === 'message' ? 'message' : actionText[event.kind] ? 'alert' : 'normal');
     if (event.kind === 'message') animateReceive();
     if (desktop && state.notifications) desktop.notify(state.profile.petName || DEFAULT_PET_NAME, event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
   }
@@ -1116,7 +1161,7 @@ async function connect(url, name, mode, { restoreHost = false } = {}) {
     $('events').appendChild(empty);
   } else {
     visibleEvents.forEach(event => { seenEvents.add(event.id); renderEvent(event); });
-    $('speech').textContent = '';
+    clearSpeech();
   }
   if (panelKind === 'chat') for (const transfer of transferStates.values()) showTransfer(transfer);
   applyProfile(state.profile);
@@ -1142,6 +1187,7 @@ async function connect(url, name, mode, { restoreHost = false } = {}) {
 async function disconnect() {
   ++connectionEpoch;
   state.connected = false;
+  clearSpeech();
   const roomUrl = state.url;
   // Capture credentials before clearing them. Leaving an unavailable room must
   // never hold the desktop UI open while a network request times out.
@@ -1305,6 +1351,10 @@ async function init() {
   document.addEventListener('mouseleave', () => { lastPointer = null; syncMousePassThrough(); });
   document.addEventListener('focusin', syncMousePassThrough);
   document.addEventListener('focusout', syncMousePassThrough);
+  $('speech').addEventListener('mouseenter', () => {
+    if ($('speech').classList.contains('speech-message')) clearTimeout(speak.timer);
+  });
+  $('speech').addEventListener('mouseleave', scheduleSpeechDismiss);
   if (panelMode && panelKind === 'settings' && !localStorage.getItem(SESSION_KEY)) {
     $('setup').hidden = true;
     $('appSettings').hidden = false;

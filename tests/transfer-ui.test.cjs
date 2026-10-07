@@ -43,11 +43,16 @@ class Element {
   addEventListener(event, callback) { this.listeners.set(event, callback); }
   setAttribute(name, value) { this[name] = value; }
   focus() { this.focused = true; }
+  matches(selector) { return selector === ':hover' && Boolean(this.hovered); }
   click() { return this.listeners.get('click')?.(); }
 }
 
 function renderer(panelKind = '') {
-  const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(([, id]) => [id, new Element()]));
+  const elements = new Map([...html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)].map(([tag, id]) => {
+    const element = new Element();
+    element.hidden = /\shidden(?:\s|>|=)/.test(tag);
+    return [id, element];
+  }));
   const calls = [];
   const timers = new Map();
   let clock = 0;
@@ -108,6 +113,40 @@ test('closing and reopening the quick composer preserves an unsent draft', () =>
   page.run('setQuickComposer(true)');
   assert.equal(page.elements.get('quickMessageForm').hidden, false);
   assert.equal(input.value, '下班一起吃饭呀');
+});
+
+test('incoming speech stays readable through action feedback and pauses while hovered', () => {
+  const page = renderer();
+  const bubble = page.elements.get('speech');
+  page.run("speak('下班一起吃饭呀', 'message')");
+  page.advance(2000);
+  page.run("speak('动作送出去了', 'alert')");
+  assert.equal(bubble.textContent, '下班一起吃饭呀');
+  assert.equal(bubble.classList.contains('speech-message'), true);
+  bubble.hovered = true;
+  page.run('scheduleSpeechDismiss()');
+  page.advance(20000);
+  assert.equal(bubble.textContent, '下班一起吃饭呀');
+  bubble.hovered = false;
+  page.run('scheduleSpeechDismiss()');
+  page.advance(4499);
+  assert.ok(bubble.textContent);
+  page.advance(1);
+  assert.equal(bubble.textContent, '');
+  assert.equal(bubble.classList.contains('speech-message'), false);
+});
+
+test('long messages get more reading time and switching conversation clears their bubble', () => {
+  const page = renderer();
+  const bubble = page.elements.get('speech');
+  page.run("speak('一起出去走走。'.repeat(40), 'message')");
+  page.advance(11999);
+  assert.ok(bubble.textContent);
+  page.advance(1);
+  assert.equal(bubble.textContent, '');
+  page.run("speak('新的消息', 'message'); clearConversation()");
+  assert.equal(bubble.textContent, '');
+  assert.equal(bubble.classList.contains('speech-message'), false);
 });
 
 for (const action of ['delivery', 'receive', 'hug']) {

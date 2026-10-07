@@ -10,11 +10,11 @@ const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8
 function renderer(panelKind) {
   const calls = [];
   const elements = new Map();
-  for (const [, id] of html.matchAll(/\bid="([^"]+)"/g)) {
+  for (const [tag, id] of html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)) {
     assert.ok(!elements.has(id), `Duplicate element id: ${id}`);
     elements.set(id, {
       parentElement: null,
-      hidden: false,
+      hidden: /\shidden(?:\s|>|=)/.test(tag),
       classList: { add() {}, remove() {}, toggle() {} },
       setAttribute() {},
       appendChild(child) { child.parentElement = this; return child; }

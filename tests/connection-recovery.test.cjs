@@ -4,6 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ConnectionPolicy = require('../public/connection-policy.js');
+const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const hiddenIds = new Set([...html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)]
+  .filter(([tag]) => /\shidden(?:\s|>|=)/.test(tag)).map(([, id]) => id));
 
 function renderer(panelKind = '') {
   const elements = new Map();
@@ -36,7 +39,7 @@ function renderer(panelKind = '') {
       setOnline() {}, setWindowSize() {}, closePanel() { environment.panelsClosed++; },
       onMenuAction() {}, onWalkState() {}, onResume: listener => listeners.set('resume', listener), getAutoLaunch: async () => true
     } },
-    document: { body: { classList: { add() {} } }, addEventListener() {}, querySelectorAll: () => [], createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } },
+    document: { body: { classList: { add() {} } }, addEventListener() {}, querySelectorAll: () => [], createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, { ...element(), hidden: hiddenIds.has(id) }); return elements.get(id); } },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     crypto: { randomUUID: () => 'recovery-test' },
     URL, URLSearchParams, location: { search: '' }, AbortSignal, WebSocket: Socket,

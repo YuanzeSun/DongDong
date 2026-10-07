@@ -38,6 +38,12 @@
   transition: opacity .1s ease, visibility .1s ease;
 }
 .speech:empty { display: none; }
+.speech.speech-message {
+  max-height: 76px; padding: 9px 12px; line-height: 18px; text-align: left;
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; text-overflow: clip;
+  color: #29483d; border-color: #b6d9c8; background: #fffefa;
+}
+.window.compact .speech.speech-message,
 .window.compact.cat-hovered .speech,
 .window.compact.cat-hovered .couple-badge,
 .window.compact.cat-hovered .compact-actions,
