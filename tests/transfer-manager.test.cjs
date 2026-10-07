@@ -57,7 +57,11 @@ test('native transfer manager streams real room upload/download and publishes sa
     const sent = await terminal(sender, 'real-transfer'); assert.equal(sent.phase, 'uploaded'); assert.equal(sent.progress, 100);
     const saved = await receiver.download({ url: ctx.url, token: ctx.guest.token, fileId: sent.fileId, fileName: '照片 中文.bin', transferId: 'real-transfer' });
     assert.equal(saved.phase, 'saved'); assert.equal(saved.progress, 100); assert.equal(saved.canCancel, false);
-    assert.equal(fs.realpathSync(path.dirname(saved.savedPath)), fs.realpathSync(temp.downloads)); assert.deepEqual(fs.readFileSync(saved.savedPath), content);
+    const actualDirectory = fs.statSync(path.dirname(saved.savedPath));
+    const expectedDirectory = fs.statSync(temp.downloads);
+    assert.equal(actualDirectory.dev, expectedDirectory.dev);
+    assert.equal(actualDirectory.ino, expectedDirectory.ino);
+    assert.deepEqual(fs.readFileSync(saved.savedPath), content);
     assert.ok(phases.includes('send:uploading')); assert.ok(phases.includes('send:uploaded'));
     assert.ok(phases.includes('receive:downloading')); assert.ok(phases.includes('receive:saved'));
     const records = await (await fetch(`${ctx.url}/api/transfers`, { headers: { 'X-Pet-Session': ctx.host.token } })).json();
