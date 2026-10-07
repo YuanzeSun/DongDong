@@ -433,6 +433,25 @@ function setMode(mode) {
   $('setupFeedback').textContent = '';
 }
 
+let addressRequestId = 0;
+async function refreshHostAddresses() {
+  if (panelMode || state.connected || $('setup').hidden) return;
+  const requestId = ++addressRequestId;
+  const addresses = await desktop.addresses().catch(() => []);
+  if (requestId !== addressRequestId || state.connected || $('setup').hidden) return;
+  const select = $('hostAddress');
+  const selected = select.value;
+  select.replaceChildren();
+  for (const item of addresses.length ? addresses : [{ address: '', name: '未检测到 Tailscale 地址' }]) {
+    const option = document.createElement('option');
+    option.value = item.address;
+    option.textContent = item.address ? `${item.address} (${item.name})` : item.name;
+    select.appendChild(option);
+  }
+  select.value = addresses.some(item => item.address === selected) ? selected : addresses[0]?.address || '';
+  $('hostForm').querySelector('button[type=submit]').disabled = !select.value;
+}
+
 let scanRequestId = 0;
 async function scanPeers() {
   const requestId = ++scanRequestId;
@@ -560,7 +579,6 @@ function clearConversation() {
   $('messageInput').value = '';
   delete $('quickMessageForm').dataset.pendingId;
   delete $('messageForm').dataset.pendingId;
-  clearTimeout(poseTimer);
   if (!panelMode && state.pose === 'delivery-hold') transitionPose(state.peerOnline ? 'idle' : 'nap');
   updateFileControls();
 }
@@ -1233,7 +1251,7 @@ async function sendFile(file) {
 
 function cancelRoomTransfers(url) {
   activeTransferAnimations.clear();
-  desktop?.cancelRoomTransfers?.(url);
+  if (url) desktop?.forgetRoomTransfers?.(url);
   updateFileControls();
 }
 
@@ -1271,10 +1289,11 @@ async function copy(value) {
 }
 
 async function init() {
-  window.addEventListener('online', () => recoverConnection(true));
-  window.addEventListener('focus', () => recoverConnection());
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) recoverConnection(); });
-  desktop?.onResume?.(() => recoverConnection(true));
+  const recover = force => { recoverConnection(force); refreshHostAddresses(); };
+  window.addEventListener('online', () => recover(true));
+  window.addEventListener('focus', () => recover());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) recover(); });
+  desktop?.onResume?.(() => recover(true));
   if (desktop?.onTransferProgress) {
     desktop.onTransferProgress(showTransfer);
     desktop.transferSnapshot().then(items => items.forEach(showTransfer)).catch(() => {});
@@ -1290,7 +1309,7 @@ async function init() {
     $('setup').hidden = true;
     $('appSettings').hidden = false;
   }
-  $('hostTab').addEventListener('click', () => setMode('host'));
+  $('hostTab').addEventListener('click', () => { setMode('host'); refreshHostAddresses(); });
   $('joinTab').addEventListener('click', () => { setMode('join'); scanPeers(); });
   $('scanPeersButton').addEventListener('click', scanPeers);
   $('joinAddress').addEventListener('input', () => $('scanResults').querySelectorAll('.scan-choice').forEach(item => item.classList.remove('selected')));
@@ -1479,22 +1498,7 @@ async function init() {
     if (state.connected) sendFile(event.dataTransfer.files[0]);
   });
 
-  const addresses = await desktop.addresses();
-  $('hostAddress').replaceChildren();
-  if (addresses.length) {
-    for (const item of addresses) {
-      const option = document.createElement('option');
-      option.value = item.address;
-      option.textContent = `${item.address} (${item.name})`;
-      $('hostAddress').appendChild(option);
-    }
-  } else {
-    const option = document.createElement('option');
-    option.textContent = '未检测到 Tailscale 地址';
-    option.value = '';
-    $('hostAddress').appendChild(option);
-    $('hostForm').querySelector('button[type=submit]').disabled = true;
-  }
+  await refreshHostAddresses();
 
   $('hostForm').addEventListener('submit', async event => {
     event.preventDefault();

@@ -12,8 +12,15 @@ function renderer(panelKind = '') {
   const sockets = [];
   const listeners = new Map();
   let nextTimer = 1;
-  const environment = { addresses: [], starts: 0, stops: 0, panelsClosed: 0 };
-  const element = () => ({ hidden: false, value: '', dataset: {}, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, replaceChildren() {}, setAttribute() {}, addEventListener() {}, querySelector: element });
+  const environment = { addresses: [], addressReads: 0, starts: 0, stops: 0, panelsClosed: 0 };
+  const element = () => {
+    const queries = new Map();
+    return { hidden: false, value: '', dataset: {}, children: [], listeners: new Map(), style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} },
+      appendChild(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, setAttribute() {},
+      addEventListener(type, listener) { this.listeners.set(type, listener); },
+      querySelector(selector) { if (!queries.has(selector)) queries.set(selector, element()); return queries.get(selector); }
+    };
+  };
   class Socket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -23,11 +30,11 @@ function renderer(panelKind = '') {
   const context = vm.createContext({
     window: { ConnectionPolicy, addEventListener: (type, listener) => listeners.set(type, listener), petDesktop: {
       panelKind,
-      addresses: async () => environment.addresses,
+      addresses: async () => { environment.addressReads++; return environment.addresses; },
       startHost: async address => { environment.starts++; return { url: `http://${address}:4827` }; },
       stopHost: async () => { environment.stops++; },
       setOnline() {}, setWindowSize() {}, closePanel() { environment.panelsClosed++; },
-      onMenuAction() {}, onWalkState() {}, getAutoLaunch: async () => true
+      onMenuAction() {}, onWalkState() {}, onResume: listener => listeners.set('resume', listener), getAutoLaunch: async () => true
     } },
     document: { body: { classList: { add() {} } }, addEventListener() {}, querySelectorAll: () => [], createElement: element, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
@@ -171,4 +178,70 @@ test('opening a direct IP session sends identity without a pairing code', async 
   assert.equal(request.url, 'http://100.80.0.1:4827/api/session');
   assert.deepEqual(JSON.parse(request.options.body), { senderId: 'recovery-test', senderName: '我', mode: 'join', fresh: false });
   assert.equal(request.options.headers['X-Pet-Key'], undefined);
+});
+
+for (const event of ['focus', 'online', 'resume', 'hostTab']) {
+  test(`${event} discovers Tailscale after an offline first launch and enables room creation`, async () => {
+    const page = renderer();
+    await page.run('init()');
+    const submit = page.elements.get('hostForm').querySelector('button[type=submit]');
+    assert.equal(submit.disabled, true);
+    page.environment.addresses = [{ address: '100.80.0.1', name: 'Tailscale' }];
+    if (event === 'hostTab') page.elements.get('hostTab').listeners.get('click')();
+    else page.listeners.get(event)();
+    await new Promise(setImmediate);
+    assert.equal(submit.disabled, false);
+    assert.equal(page.elements.get('hostAddress').value, '100.80.0.1');
+  });
+}
+
+test('address refresh preserves a valid selection and disables creation when addresses disappear', async () => {
+  const page = renderer();
+  page.environment.addresses = ['100.80.0.1', '100.80.0.2'].map(address => ({ address, name: 'Tailscale' }));
+  await page.run('init()');
+  const select = page.elements.get('hostAddress');
+  select.value = '100.80.0.2';
+  await page.run('refreshHostAddresses()');
+  assert.equal(select.value, '100.80.0.2');
+  page.environment.addresses = [{ address: '100.80.0.3', name: 'Tailscale' }];
+  await page.run('refreshHostAddresses()');
+  assert.equal(select.value, '100.80.0.3');
+  page.context.window.petDesktop.addresses = async () => { throw new Error('network unavailable'); };
+  await page.run('refreshHostAddresses()');
+  assert.equal(select.value, '');
+  assert.equal(page.elements.get('hostForm').querySelector('button[type=submit]').disabled, true);
+});
+
+test('a late address response cannot replace a newer refresh or alter a connected room', async () => {
+  const page = renderer();
+  const requests = [];
+  page.context.window.petDesktop.addresses = () => new Promise(resolve => requests.push(resolve));
+  const first = page.run('refreshHostAddresses()');
+  const latest = page.run('refreshHostAddresses()');
+  requests[1]([{ address: '100.80.0.2', name: 'Tailscale' }]);
+  await latest;
+  requests[0]([]);
+  await first;
+  assert.equal(page.elements.get('hostAddress').value, '100.80.0.2');
+  const pending = page.run('refreshHostAddresses()');
+  page.run('state.connected = true');
+  requests[2]([]);
+  await pending;
+  assert.equal(page.elements.get('hostAddress').value, '100.80.0.2');
+});
+
+test('address refresh is limited to the main setup window', async () => {
+  for (const panelKind of ['', 'settings', 'chat']) {
+    const page = renderer(panelKind);
+    await page.run('init()');
+    const reads = page.environment.addressReads;
+    if (!panelKind) page.run('state.connected = true');
+    await page.run('refreshHostAddresses()');
+    assert.equal(page.environment.addressReads, reads);
+    if (panelKind) assert.equal(reads, 0);
+  }
+  const hidden = renderer();
+  hidden.run("$('setup').hidden = true");
+  await hidden.run('refreshHostAddresses()');
+  assert.equal(hidden.environment.addressReads, 0);
 });

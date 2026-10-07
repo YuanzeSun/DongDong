@@ -345,3 +345,78 @@ test('fresh room reset rejects JSON writes that began in the previous conversati
     assert.equal((await postJson(ctx, 'transfers', session, { transferId: 'new-file', name: 'new.txt', phase: 'uploading', progress: 0 })).status, 200);
   } finally { request?.destroy(); await closeRoom(ctx); }
 });
+
+test('leaving while a file awaits saving cancels it for both peers and frees the next transfer', async () => {
+  for (const phase of ['uploaded', 'downloading']) {
+    const ctx = await setup(`hello-pet-leave-${phase}-`); let download;
+    try {
+      const host = await ctx.session('host', 'host'); const guest = await ctx.session('guest', 'join');
+      const hs = await openSocket(ctx, host); const gs = await openSocket(ctx, guest);
+      await postJson(ctx, 'transfers', host, { transferId: 'leaving-file', name: 'large.txt', phase: 'uploading' });
+      const form = new FormData(); form.append('file', new Blob([Buffer.alloc(8 * 1024 * 1024, 'a')]), 'large.txt');
+      const uploaded = await fetch(`${ctx.base}/api/files`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'X-Pet-Transfer': 'leaving-file' }, body: form });
+      assert.equal(uploaded.status, 201); const file = await uploaded.json();
+      if (phase === 'downloading') {
+        await postJson(ctx, 'transfers', guest, { transferId: 'leaving-file', fileId: file.fileId, phase, progress: 10 });
+        await new Promise((resolve, reject) => {
+          download = http.get(`${ctx.base}/api/files/${file.fileId}`, { headers: sessionHeaders(guest) }, res => { res.on('error', () => {}); res.pause(); resolve(); });
+          download.on('error', reject);
+        });
+      }
+      const cancelled = socket => waitFor(socket, item => item.type === 'transfer' && item.transfer.phase === 'cancelled');
+      const notices = [cancelled(hs), cancelled(gs)];
+      const leaving = phase === 'uploaded' ? host : guest; const remaining = leaving === host ? guest : host;
+      assert.equal((await fetch(`${ctx.base}/api/leave`, { method: 'POST', headers: sessionHeaders(leaving) })).status, 204);
+      const snapshot = await (await fetch(`${ctx.base}/api/transfers`, { headers: sessionHeaders(remaining) })).json();
+      assert.equal(snapshot[0].phase, 'cancelled');
+      for (const notice of await Promise.all(notices)) assert.equal(notice.transfer.transferId, 'leaving-file');
+      assert.equal((await postJson(ctx, 'transfers', leaving, { transferId: 'leaving-file', fileId: file.fileId, phase: 'downloading' })).status, 401);
+      assert.equal((await postJson(ctx, 'transfers', remaining, { transferId: 'next-file', name: 'next.txt', phase: 'uploading' })).status, 200);
+      hs.close(); gs.close();
+    } finally { download?.destroy(); await closeRoom(ctx); }
+  }
+});
+
+test('leaving during a partial upload aborts the request and removes its file before the next transfer', async () => {
+  const ctx = await setup('hello-pet-leave-upload-'); let request;
+  try {
+    const host = await ctx.session('host', 'host'); const guest = await ctx.session('guest', 'join');
+    await postJson(ctx, 'transfers', host, { transferId: 'partial-leave', name: 'partial.txt', phase: 'uploading' });
+    const boundary = 'pet-leave-boundary';
+    request = http.request(`${ctx.base}/api/files`, { method: 'POST', headers: { 'X-Pet-Session': host.token, 'X-Pet-Transfer': 'partial-leave', 'Content-Type': `multipart/form-data; boundary=${boundary}` } });
+    request.on('error', () => {});
+    request.write(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="partial.txt"\r\nContent-Type: text/plain\r\n\r\n`);
+    request.write(Buffer.alloc(64 * 1024, 'a'));
+    const files = () => fs.readdirSync(path.join(ctx.dataDir, 'files'));
+    for (let attempt = 0; attempt < 100 && files().length === 0; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(files().length, 1);
+    assert.equal((await fetch(`${ctx.base}/api/leave`, { method: 'POST', headers: sessionHeaders(host) })).status, 204);
+    for (let attempt = 0; attempt < 100 && files().length; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.deepEqual(files(), []);
+    const transfers = await (await fetch(`${ctx.base}/api/transfers`, { headers: sessionHeaders(guest) })).json();
+    assert.equal(transfers[0].phase, 'cancelled');
+    assert.equal((await postJson(ctx, 'transfers', guest, { transferId: 'next-upload', name: 'next.txt', phase: 'uploading' })).status, 200);
+  } finally { request?.destroy(); await closeRoom(ctx); }
+});
+
+test('leaving revokes a progress request whose JSON body was already being received', async () => {
+  const ctx = await setup('hello-pet-leave-inflight-'); let request;
+  try {
+    const host = await ctx.session('host', 'host'); const guest = await ctx.session('guest', 'join');
+    const transfer = { transferId: 'late-progress', name: 'old.txt', phase: 'uploading', progress: 0 };
+    await postJson(ctx, 'transfers', host, transfer);
+    const body = JSON.stringify({ ...transfer, progress: 50 });
+    const received = new Promise(resolve => ctx.room.server.once('request', req => req.once('data', resolve)));
+    const response = new Promise((resolve, reject) => {
+      request = http.request(`${ctx.base}/api/transfers`, { method: 'POST', headers: { ...sessionHeaders(host), 'Content-Length': Buffer.byteLength(body) } }, res => { res.resume(); res.once('end', () => resolve(res.statusCode)); });
+      request.once('error', reject); request.write(body.slice(0, 1));
+    });
+    await received;
+    assert.equal((await fetch(`${ctx.base}/api/leave`, { method: 'POST', headers: sessionHeaders(host) })).status, 204);
+    request.end(body.slice(1));
+    assert.equal(await response, 401);
+    const transfers = await (await fetch(`${ctx.base}/api/transfers`, { headers: sessionHeaders(guest) })).json();
+    assert.equal(transfers[0].phase, 'cancelled');
+    assert.equal((await postJson(ctx, 'transfers', guest, { transferId: 'after-leave', name: 'next.txt', phase: 'uploading' })).status, 200);
+  } finally { request?.destroy(); await closeRoom(ctx); }
+});

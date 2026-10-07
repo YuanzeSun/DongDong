@@ -283,7 +283,6 @@ else {
     ipcMain.handle('save-remote-file', (_event, details) => transferManager.download(details));
     ipcMain.handle('retry-transfer', (_event, details) => transferManager.retry(details));
     ipcMain.handle('cancel-transfer', (_event, details) => transferManager.cancel(details));
-    ipcMain.handle('cancel-room-transfers', (_event, url) => transferManager.cancelRoom(url));
     ipcMain.handle('transfer-session', (event, url, token) => { if (ownsCat(event)) transferManager.updateSession(url, token); });
     ipcMain.handle('update-transfer', (event, url, item) => { if (ownsCat(event)) transferManager.updateTransfer(url, item); });
     ipcMain.handle('forget-room-transfers', (event, url) => { if (ownsCat(event)) transferManager.forgetRoom(url); });

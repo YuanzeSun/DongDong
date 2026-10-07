@@ -31,7 +31,6 @@ contextBridge.exposeInMainWorld('petDesktop', {
   uploadFile: (file, details) => ipcRenderer.invoke('upload-file', { ...details, path: webUtils.getPathForFile(file), fileName: file.name }),
   retryTransfer: details => ipcRenderer.invoke('retry-transfer', details),
   cancelTransfer: details => ipcRenderer.invoke('cancel-transfer', details),
-  cancelRoomTransfers: url => ipcRenderer.invoke('cancel-room-transfers', url),
   setTransferSession: (url, token) => ipcRenderer.invoke('transfer-session', url, token),
   updateTransfer: (url, item) => ipcRenderer.invoke('update-transfer', url, item),
   forgetRoomTransfers: url => ipcRenderer.invoke('forget-room-transfers', url),

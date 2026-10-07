@@ -159,6 +159,7 @@ function createRoom({ host, port = 4827, dataDir, staticDir, hostId, now = Date.
     session.lastSeen = now(); delete session.closedAt; req.session = session; req.roomId = roomId; next();
   }
   function requireCurrentRoom(req, res, next) {
+    if (sessions.get(req.session.token) !== req.session) return res.status(401).json({ error: '会话已失效，请重新连接' });
     if (req.roomId !== roomId) return res.status(409).json({ error: '房间已切换，请重试' });
     next();
   }
@@ -264,6 +265,8 @@ function createRoom({ host, port = 4827, dataDir, staticDir, hostId, now = Date.
     if (!next.petName) return res.status(400).json({ error: '宠物名称不能为空' }); profile = next; persistProfile(); sendProfile(); res.json(profile);
   });
   app.post('/api/leave', (req, res) => {
+    const transfer = activeTransfer && transfers.get(activeTransfer.id);
+    if (transfer && ACTIVE_TRANSFER_PHASES.has(transfer.phase)) publishTransfer({ ...transfer, phase: 'cancelled' });
     const session = req.session; revokeIdentity(session.senderId);
     if (session.mode === 'join' && currentGuest?.id === session.senderId) currentGuest = null;
     sendPresence(); res.status(204).end();

@@ -110,6 +110,32 @@ test('closing and reopening the quick composer preserves an unsent draft', () =>
   assert.equal(input.value, '下班一起吃饭呀');
 });
 
+for (const action of ['delivery', 'receive', 'hug']) {
+  test(`clearing a conversation preserves the ${action} action's normal finish`, () => {
+    const page = renderer();
+    page.run('state.peerOnline = false');
+    page.run(action === 'delivery' ? 'animateDelivery(1)' : `animateRemoteAction('${action}')`);
+    assert.equal(page.run('state.pose'), action);
+    page.run('clearConversation(); setPeerOnline(true)');
+    page.advance(10000);
+    assert.equal(page.run('state.pose'), 'idle');
+    assert.equal(page.animator.action, 'idle');
+    assert.equal(page.elements.get('mainMascot').classList.contains('delivery'), false);
+  });
+}
+
+test('clearing a room stops its file holding pose and exit forgets its pending callbacks', () => {
+  const page = renderer();
+  page.show({ phase: 'downloading', direction: 'receive', progress: 50 });
+  page.run('clearConversation()');
+  assert.equal(page.run('state.pose'), 'idle');
+  assert.equal(page.run('activeTransferAnimations.size'), 0);
+  let forgotten;
+  page.context.window.petDesktop.forgetRoomTransfers = url => { forgotten = url; };
+  page.run('cancelRoomTransfers(state.url)');
+  assert.equal(forgotten, 'http://127.0.0.1:4827');
+});
+
 test('a failed message keeps its draft and retry identity until a successful send', async () => {
   const page = renderer();
   const form = page.elements.get('quickMessageForm');

@@ -255,7 +255,6 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
       const job = jobs.get(keyFor(roomOrigin(details.url), details.transferId));
       return cancelJob(job);
     },
-    cancelRoom: url => { for (const job of jobs.values()) if (job.roomUrl === url) cancelJob(job); },
     localPath: details => {
       const job = jobs.get(keyFor(roomOrigin(details.url), details.transferId));
       return job?.direction === 'send' ? job.path : job?.savedPath;
