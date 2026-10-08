@@ -89,6 +89,25 @@ test('opening controls during a wake-up cancels the pending automatic walk', () 
   assert.equal(page.calls.includes('walk'), false);
 });
 
+test('a normal interaction restarts the edge-hide timer when the cat was not already hidden', () => {
+  const page = renderer();
+  page.run('state.peeked = false; state.edgeAutoOuting = false; unpeek(true);');
+  assert.ok(page.run('peekTimer'));
+  assert.ok(page.timers.get(page.run('peekTimer')).delay >= 70000);
+});
+
+test('an edge outing wakes a resting cat before changing its pose', () => {
+  const page = renderer();
+  page.run("Math.random = () => 0.5; state.peeked = true; state.pose = 'nest'; schedulePeekOuting();");
+  const outing = page.timers.get(page.run('peekOutingTimer')).callback;
+  outing();
+  assert.equal(page.run('state.edgeAutoOuting'), true);
+  assert.equal(page.run('state.pose'), 'nest');
+  const wake = page.timers.get(page.run('wakeTimer')).callback;
+  wake();
+  assert.equal(page.run('state.pose'), 'stretch');
+});
+
 test('explicit movement remains available while composing or choosing an action', () => {
   const page = renderer();
   page.run("setQuickComposer(true); startMotion('walk'); onMotionState('walk', true); setActionTray(true);");

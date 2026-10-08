@@ -54,3 +54,15 @@ test('resting poses and purr use distinct silhouettes and rise transitions', () 
   assert.equal(sample('loaf', ACTIONS.loaf.frames - 1).loafArt, true);
   assert.ok(sample('sit', ACTIONS.sit.frames - 1).by > sample('idle', 0).by, 'sitting keeps its lowered resting pose');
 });
+
+test('sitting rises through a separate return animation', () => {
+  const idle = sample('idle', 0);
+  const rise = sample('sit-rise', 0);
+  const middle = sample('sit-rise', 8);
+  const end = sample('sit-rise', ACTIONS['sit-rise'].frames - 1);
+  assert.ok(rise.by > idle.by);
+  assert.ok(middle.by < rise.by);
+  assert.equal(end.by, idle.by);
+  assert.equal(end.hy, idle.hy);
+  assert.equal(end.tail, idle.tail);
+});

@@ -254,8 +254,7 @@ function schedulePeekOuting() {
       startMotion('walk', true);
     }
     else {
-      setPose(outing);
-      setTimeout(finishPeekOuting, 2400);
+      transitionPose(outing, () => setTimeout(finishPeekOuting, 2400));
     }
   }, 90000 + Math.random() * 90000);
 }
@@ -287,12 +286,15 @@ function unpeek(userInitiated = false) {
     }, 180000);
     beginAction(finishAction);
   }
-  if (!state.peeked) return;
+  if (!state.peeked) {
+    if (userInitiated) { scheduleIdleAction(); schedulePeek(); }
+    return;
+  }
   state.peeked = false;
   $('window').classList.remove('peeked');
   desktop?.setPeeked(false);
-  if (userInitiated) scheduleIdleAction();
-  if (!userInitiated) schedulePeek();
+  if (userInitiated) { scheduleIdleAction(); schedulePeek(); }
+  else schedulePeek();
 }
 
 function scheduleIdleAction() {
@@ -315,7 +317,7 @@ function scheduleIdleAction() {
       transitionPose(action);
     } else if (['sit', 'stretch'].includes(action)) {
       transitionPose(action, () => setTimeout(() => {
-        if (state.connected && state.pose === action) transitionPose('idle');
+        if (state.connected && state.pose === action) finishAction();
       }, (catAnimator?.durationFor(action) || 1800) + 80));
     } else {
       animateLocalAction(action);
@@ -377,7 +379,14 @@ function beginAction(callback) {
 
 function finishAction() {
   if (activeTransferAnimations.size) return animateDelivery(0, true);
-  transitionPose(state.peerOnline ? 'idle' : 'nap');
+  const target = state.peerOnline ? 'idle' : 'nap';
+  if (state.pose === 'sit') {
+    transitionPose('sit-rise', () => {
+      poseTimer = setTimeout(() => {
+        if (state.pose === 'sit-rise') transitionPose(target);
+      }, catAnimator?.durationFor('sit-rise') || 700);
+    });
+  } else transitionPose(target);
   if (state.connected) { scheduleNap(); scheduleIdleAction(); }
 }
 
