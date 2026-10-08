@@ -43,6 +43,13 @@
   white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; text-overflow: clip;
   color: #29483d; border-color: #b6d9c8; background: #fffefa;
 }
+.speech.speech-message { cursor: pointer; }
+.message-row { display: flex; align-items: flex-start; gap: 3px; max-width: 100%; }
+.event.mine .message-row { justify-content: flex-end; }
+.message-body { min-width: 0; }
+.message-copy { flex: none; width: 24px; height: 24px; margin-top: 5px; padding: 4px; border: 0; border-radius: 5px; background: transparent; opacity: .55; }
+.message-copy:hover, .message-copy:focus-visible { opacity: 1; background: #e8f1ec; }
+.message-copy img { display: block; width: 15px; height: 15px; }
 .window.compact .speech.speech-message,
 .window.compact.cat-hovered .speech,
 .window.compact.cat-hovered .couple-badge,

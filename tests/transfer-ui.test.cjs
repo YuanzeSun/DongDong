@@ -66,6 +66,8 @@ function renderer(panelKind = '') {
   }
   const desktop = {
     panelKind,
+    openPanel: kind => calls.push({ action: 'open-panel', kind }),
+    copy: async value => calls.push({ action: 'copy', value }),
     setOnline() {}, setWindowSize() {},
     cancelTransfer: async details => { calls.push({ action: 'cancel', ...details }); },
     retryTransfer: async details => {
@@ -162,6 +164,23 @@ test('incoming speech scrolls explicitly inside the transparent desktop window',
   assert.equal(bubble.scrollTop, 166);
   page.run('scrollSpeech(-1000)');
   assert.equal(bubble.scrollTop, 0);
+});
+
+test('clicking an incoming speech bubble opens history and copying keeps its text', async () => {
+  const page = renderer();
+  page.run("state.connected = true; speak('晚点见', 'message'); openSpeechHistory()");
+  assert.deepEqual(page.calls.at(-1), { action: 'open-panel', kind: 'chat' });
+  await page.run('copySpeechMessage()');
+  assert.deepEqual(page.calls.at(-1), { action: 'copy', value: '晚点见' });
+});
+
+test('message history renders a direct copy control', async () => {
+  const page = renderer();
+  page.run("renderEvent({id:'message-1', kind:'message', text:'带你去吃饭', senderId:'peer', senderName:'她', createdAt:new Date().toISOString()})");
+  const copyButton = page.elements.get('events').children[0].querySelector('.message-copy');
+  assert.ok(copyButton);
+  await copyButton.click();
+  assert.deepEqual(page.calls.at(-1), { action: 'copy', value: '带你去吃饭' });
 });
 
 for (const action of ['delivery', 'receive', 'hug']) {

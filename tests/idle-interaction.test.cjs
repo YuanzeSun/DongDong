@@ -23,6 +23,7 @@ function renderer() {
     document: { getElementById(id) {
       if (!elements.has(id)) elements.set(id, {
         hidden: ['quickMessageForm', 'actionTray', 'contextMenu', 'dropOverlay'].includes(id),
+        dataset: {},
         classList: { add() {}, remove() {}, toggle() {}, contains: () => false }, setAttribute() {}, focus() {},
         getBoundingClientRect: () => ({ left: 0, right: 0, top: 0, bottom: 0 })
       });

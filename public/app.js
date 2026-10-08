@@ -61,6 +61,8 @@ function clearSpeech() {
   clearTimeout(speak.timer);
   $('speech').classList.remove('speech-pop', 'speech-alert', 'speech-message');
   $('speech').textContent = '';
+  $('speech').dataset.message = '';
+  $('speech').title = '';
   syncMousePassThrough();
 }
 
@@ -80,6 +82,21 @@ function scrollSpeech(delta) {
   bubble.scrollTop = Math.max(0, Math.min(maximum, (Number(bubble.scrollTop) || 0) + delta));
 }
 
+function openSpeechHistory() {
+  if (!state.connected || !$('speech').classList.contains('speech-message')) return;
+  desktop?.openPanel?.('chat');
+}
+
+async function copySpeechText(message) {
+  if (!message) return;
+  try { await copy(message); toast('已复制消息'); }
+  catch (error) { toast(error.message); }
+}
+
+function copySpeechMessage() {
+  return copySpeechText($('speech').dataset.message);
+}
+
 function speak(message, kind = 'normal') {
   if (panelMode) return;
   const bubble = $('speech');
@@ -88,6 +105,8 @@ function speak(message, kind = 'normal') {
   bubble.textContent = message;
   bubble.scrollTop = 0;
   bubble.classList.toggle('speech-message', kind === 'message');
+  bubble.dataset.message = kind === 'message' ? message : '';
+  bubble.title = kind === 'message' ? '点击查看消息记录，双击复制' : '';
   void bubble.offsetWidth;
   bubble.classList.add(kind === 'alert' ? 'speech-alert' : 'speech-pop');
   speak.duration = kind === 'message' ? Math.min(12000, Math.max(4500, message.length * 110)) : 1800;
@@ -967,7 +986,23 @@ function renderEvent(event) {
     body.className = 'event-body';
     const labels = { wave: '👋 向你招了招手', walk: '🐾 让你的小猫散步', jump: '✨ 让你的小猫乱蹦', pet: '🤍 摸摸小猫', fish: '🐟 投喂小鱼干', sit: '🪑 让小猫坐下', sleep: '💤 让小猫睡觉', stretch: '☀ 让小猫伸懒腰', hug: '🫂 给你一个抱抱', kiss: '💋 亲亲你', groom: '🧶 给你梳梳毛', purr: '💗 在你身边呼噜' };
     body.textContent = labels[event.kind] || event.text;
-    wrapper.appendChild(body);
+    if (event.kind === 'message') {
+      body.classList.add('message-body');
+      const row = document.createElement('div');
+      row.className = 'message-row';
+      const copyButton = document.createElement('button');
+      copyButton.className = 'message-copy';
+      copyButton.type = 'button';
+      copyButton.title = '复制消息';
+      copyButton.setAttribute('aria-label', '复制消息');
+      const copyIcon = document.createElement('img');
+      copyIcon.src = './icons/copy.svg';
+      copyIcon.alt = '';
+      copyButton.appendChild(copyIcon);
+      copyButton.addEventListener('click', () => copySpeechText(event.text));
+      row.append(body, copyButton);
+      wrapper.appendChild(row);
+    } else wrapper.appendChild(body);
   }
   $('events').appendChild(wrapper);
   while ($('events').children.length > 300) {
@@ -1373,6 +1408,8 @@ async function init() {
     if ($('speech').classList.contains('speech-message')) clearTimeout(speak.timer);
   });
   $('speech').addEventListener('mouseleave', scheduleSpeechDismiss);
+  $('speech').addEventListener('click', openSpeechHistory);
+  $('speech').addEventListener('dblclick', copySpeechMessage);
   $('speech').addEventListener('wheel', event => {
     if ($('speech').scrollHeight <= $('speech').clientHeight) return;
     event.preventDefault();
