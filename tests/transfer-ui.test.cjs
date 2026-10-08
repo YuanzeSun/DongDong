@@ -149,6 +149,21 @@ test('long messages get more reading time and switching conversation clears thei
   assert.equal(bubble.classList.contains('speech-message'), false);
 });
 
+test('incoming speech scrolls explicitly inside the transparent desktop window', () => {
+  const page = renderer();
+  const bubble = page.elements.get('speech');
+  page.run("speak('很长的一段消息', 'message')");
+  bubble.scrollHeight = 240;
+  bubble.clientHeight = 74;
+  bubble.scrollTop = 0;
+  page.run('scrollSpeech(80)');
+  assert.equal(bubble.scrollTop, 80);
+  page.run('scrollSpeech(1000)');
+  assert.equal(bubble.scrollTop, 166);
+  page.run('scrollSpeech(-1000)');
+  assert.equal(bubble.scrollTop, 0);
+});
+
 for (const action of ['delivery', 'receive', 'hug']) {
   test(`clearing a conversation preserves the ${action} action's normal finish`, () => {
     const page = renderer();

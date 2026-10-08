@@ -71,6 +71,15 @@ function scheduleSpeechDismiss() {
   speak.timer = setTimeout(clearSpeech, speak.duration);
 }
 
+function scrollSpeech(delta) {
+  const bubble = $('speech');
+  if (!bubble.classList.contains('speech-message') || !Number.isFinite(delta)
+    || !Number.isFinite(bubble.scrollHeight) || !Number.isFinite(bubble.clientHeight)
+    || bubble.scrollHeight <= bubble.clientHeight) return;
+  const maximum = bubble.scrollHeight - bubble.clientHeight;
+  bubble.scrollTop = Math.max(0, Math.min(maximum, (Number(bubble.scrollTop) || 0) + delta));
+}
+
 function speak(message, kind = 'normal') {
   if (panelMode) return;
   const bubble = $('speech');
@@ -1364,6 +1373,11 @@ async function init() {
     if ($('speech').classList.contains('speech-message')) clearTimeout(speak.timer);
   });
   $('speech').addEventListener('mouseleave', scheduleSpeechDismiss);
+  $('speech').addEventListener('wheel', event => {
+    if ($('speech').scrollHeight <= $('speech').clientHeight) return;
+    event.preventDefault();
+    scrollSpeech(event.deltaY);
+  }, { passive: false });
   if (panelMode && panelKind === 'settings' && !localStorage.getItem(SESSION_KEY)) {
     $('setup').hidden = true;
     $('appSettings').hidden = false;
