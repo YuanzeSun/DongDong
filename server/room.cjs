@@ -19,7 +19,7 @@ const GUEST_GRACE_MS = 5000;
 const TRANSFER_LEASE_MS = 15 * 60 * 1000;
 const ACTIVE_TRANSFER_PHASES = new Set(['uploading', 'uploaded', 'downloading']);
 const PROTOCOL_VERSION = '4';
-const EVENT_KINDS = new Set(['message', 'wave', 'walk', 'jump', 'pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr']);
+const EVENT_KINDS = new Set(['message', 'wave', 'walk', 'jump', 'pet', 'fish', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr']);
 const ACTION_KINDS = new Set([...EVENT_KINDS].filter(kind => kind !== 'message'));
 
 function stringValue(value, max) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
@@ -53,7 +53,7 @@ function createTimedCache({ maxAge, maxSize, now = Date.now }) {
   };
 }
 
-function createRoom({ host, port = 4827, dataDir, staticDir, hostId, now = Date.now }) {
+function createRoom({ host, port = 4827, dataDir, staticDir, hostId, now = Date.now, onDiagnostic = () => {} }) {
   if (!host || !dataDir || !staticDir) throw new Error('Room configuration is incomplete');
   fs.mkdirSync(dataDir, { recursive: true });
   const fileDir = path.join(dataDir, 'files');
@@ -143,11 +143,9 @@ function createRoom({ host, port = 4827, dataDir, staticDir, hostId, now = Date.
   }
   const sendPresence = () => { for (const socket of sockets.clients) if (liveSocket(socket)) { const presence = presenceFor(socket.session); socket.send(JSON.stringify({ type: 'presence', ...presence, presence })); } };
   const sendProfile = () => { const wire = JSON.stringify({ type: 'profile', profile }); for (const socket of sockets.clients) if (liveSocket(socket)) socket.send(wire); };
-  function broadcastEvent(event, persist = true) {
-    if (persist) {
-      events.push(event);
-      while (events.length > MAX_EVENTS) { const removed = events.shift(); if (removed?.kind === 'file' && removed.fileId) fs.rm(path.join(fileDir, removed.fileId), { force: true }, () => {}); }
-    }
+  function broadcastEvent(event) {
+    events.push(event);
+    while (events.length > MAX_EVENTS) { const removed = events.shift(); if (removed?.kind === 'file' && removed.fileId) fs.rm(path.join(fileDir, removed.fileId), { force: true }, () => {}); }
     const wire = JSON.stringify({ type: 'event', event });
     for (const socket of sockets.clients) if (liveSocket(socket)) socket.send(wire);
     return event;
@@ -254,7 +252,7 @@ function createRoom({ host, port = 4827, dataDir, staticDir, hostId, now = Date.
     const event = { id: crypto.randomUUID(), kind, text, senderId: session.senderId, senderName: session.senderName, createdAt: new Date(now()).toISOString() };
     if (clientId) event.clientId = clientId;
     if (kind === 'message') { const transferId = stringValue(req.body?.data?.transferId, 120); if (transferId) event.transferId = transferId; }
-    const output = broadcastEvent(event, kind === 'message'); if (idempotenceKey) idempotent.set(idempotenceKey, output); res.status(201).json(output);
+    const output = broadcastEvent(event); if (idempotenceKey) idempotent.set(idempotenceKey, output); res.status(201).json(output);
   });
 
   app.get('/api/profile', (_req, res) => res.json(profile));
@@ -303,7 +301,7 @@ function createRoom({ host, port = 4827, dataDir, staticDir, hostId, now = Date.
     if (!previous || previous.senderId !== req.session.senderId || previous.fileId || previous.phase !== 'uploading' || activeTransfer?.id !== transferId) { fs.rm(req.file.path, { force: true }, () => {}); return res.status(409).json({ error: '传输已停止，请重新发送' }); }
     const event = { id: crypto.randomUUID(), kind: 'file', transferId, fileId: req.file.filename, fileName: previous.name, size: req.file.size, senderId: req.session.senderId, senderName: req.session.senderName, createdAt: new Date(now()).toISOString() };
     publishTransfer({ ...previous, fileId: event.fileId, phase: 'uploaded', progress: 100 });
-    broadcastEvent(event, true); res.status(201).json(event);
+    broadcastEvent(event); res.status(201).json(event);
   });
   app.get('/api/files/:id', (req, res) => {
     const event = events.find(item => item.kind === 'file' && item.fileId === req.params.id); if (!event) return res.sendStatus(404);
@@ -315,7 +313,7 @@ function createRoom({ host, port = 4827, dataDir, staticDir, hostId, now = Date.
     res.once('close', releaseRequest);
     res.download(path.join(fileDir, event.fileId), event.fileName, error => { releaseRequest(); if (error && !res.headersSent && !res.destroyed) res.status(404).end(); });
   });
-  app.use((error, req, res, _next) => { if (req.aborted || res.destroyed) return; if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件不能超过 100 MB' }); if (error instanceof SyntaxError && error.status === 400) return res.status(400).json({ error: '请求格式无效' }); console.error(error); res.status(500).json({ error: '操作失败，请重试' }); });
+  app.use((error, req, res, _next) => { if (req.aborted || res.destroyed) return; if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件不能超过 100 MB' }); if (error instanceof SyntaxError && error.status === 400) return res.status(400).json({ error: '请求格式无效' }); onDiagnostic('server-error', { name: error.name, code: error.code, status: 500 }); res.status(500).json({ error: '操作失败，请重试' }); });
 
   server.on('upgrade', (request, socket, head) => {
     pruneCaches();

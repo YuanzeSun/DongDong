@@ -55,7 +55,7 @@ for (const panel of ['settings', 'chat']) {
       state.peerOnline = true;
       state.edgeHideEnabled = true;
       startCatActivity();
-      scheduleNap(); schedulePeek(); schedulePeekOuting(); scheduleIdleAction();
+      scheduleNap(); schedulePeek();
       setPose('sleep'); transitionPose('nest');
       wakeThen(() => { throw new Error('Panel ran a motion callback'); });
       speak('喵'); actionVoice('purr');
@@ -63,8 +63,7 @@ for (const panel of ['settings', 'chat']) {
       startMotion('walk'); startMotion('jump');
       onMotionState('walk', true); onMotionState('jump', true); interruptMotion();
       state.peeked = true;
-      state.edgeAutoOuting = true;
-      unpeek(true); finishPeekOuting();
+      unpeek(true);
       setEdgeHide(false);
     `);
     assert.deepEqual(page.calls, []);

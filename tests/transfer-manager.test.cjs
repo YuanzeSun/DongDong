@@ -51,14 +51,16 @@ function statusReply(req, res) {
 
 test('native transfer manager streams real room upload/download and publishes saved progress', async () => {
   const temp = scratch(); const ctx = await startRoom(temp.root); const phases = [];
-  const sender = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: job => phases.push(`send:${job.phase}`) });
-  const receiver = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: job => phases.push(`receive:${job.phase}`) });
+  const diagnostics = []; const transferId = crypto.randomUUID();
+  const onDiagnostic = (event, details) => diagnostics.push({ event, ...details });
+  const sender = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: job => phases.push(`send:${job.phase}`), onDiagnostic });
+  const receiver = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: job => phases.push(`receive:${job.phase}`), onDiagnostic });
   try {
     const content = crypto.randomBytes(280000); const source = path.join(temp.root, '照片 中文.bin'); fs.writeFileSync(source, content);
-    const initial = sender.upload({ url: ctx.url, token: ctx.host.token, path: source, transferId: 'real-transfer' });
+    const initial = sender.upload({ url: ctx.url, token: ctx.host.token, path: source, transferId });
     assert.equal(initial.phase, 'uploading'); assert.equal(initial.canCancel, true);
-    const sent = await terminal(sender, 'real-transfer'); assert.equal(sent.phase, 'uploaded'); assert.equal(sent.progress, 100);
-    const saved = await receiver.download({ url: ctx.url, token: ctx.guest.token, fileId: sent.fileId, fileName: '照片 中文.bin', transferId: 'real-transfer' });
+    const sent = await terminal(sender, transferId); assert.equal(sent.phase, 'uploaded'); assert.equal(sent.progress, 100);
+    const saved = await receiver.download({ url: ctx.url, token: ctx.guest.token, fileId: sent.fileId, fileName: '照片 中文.bin', transferId });
     assert.equal(saved.phase, 'saved'); assert.equal(saved.progress, 100); assert.equal(saved.canCancel, false);
     const actualDirectory = fs.statSync(path.dirname(saved.savedPath));
     const expectedDirectory = fs.statSync(temp.downloads);
@@ -69,7 +71,37 @@ test('native transfer manager streams real room upload/download and publishes sa
     assert.ok(phases.includes('receive:downloading')); assert.ok(phases.includes('receive:saved'));
     const records = await (await fetch(`${ctx.url}/api/transfers`, { headers: { 'X-Pet-Session': ctx.host.token } })).json();
     assert.equal(records[0].phase, 'saved'); assert.equal(records[0].progress, 100);
+    sender.updateTransfer(ctx.url, records[0]);
+    sender.updateTransfer(ctx.url, records[0]);
+    assert.deepEqual(diagnostics.map(item => `${item.direction}:${item.event}:${item.phase || ''}`), [
+      'send:transfer-start:', 'send:transfer-finish:uploaded',
+      'receive:transfer-start:', 'receive:transfer-finish:saved', 'send:transfer-finish:saved'
+    ]);
+    assert.ok(diagnostics.every(item => item.transferId === transferId));
+    assert.doesNotMatch(JSON.stringify(diagnostics), /照片|http:|token|savedPath|downloads/);
   } finally { sender.close(); receiver.close(); await ctx.room.close(); temp.clean(); }
+});
+
+test('failed transfers log fixed error details and diagnostic failures do not interrupt retries', async () => {
+  const temp = scratch(); const diagnostics = [];
+  const fake = await localServer((req, res) => {
+    if (statusReply(req, res)) return;
+    req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ fileId: crypto.randomUUID() })); });
+  });
+  let failDiagnostic = false;
+  const manager = createTransferManager({ downloadsPath: () => temp.downloads, onProgress: () => {},
+    onDiagnostic: (event, details) => { if (failDiagnostic) throw new Error('diagnostic unavailable'); diagnostics.push({ event, ...details }); } });
+  try {
+    const source = path.join(temp.root, 'private.txt'); const transferId = crypto.randomUUID();
+    manager.upload({ url: fake.url, token: 'secret', path: source, transferId });
+    assert.equal((await terminal(manager, transferId)).phase, 'failed');
+    const failure = diagnostics.find(item => item.event === 'transfer-finish');
+    assert.equal(failure.transferId, transferId); assert.equal(failure.category, 'filesystem'); assert.equal(failure.code, 'ENOENT');
+    assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|http:/);
+    fs.writeFileSync(source, 'test'); failDiagnostic = true;
+    manager.retry({ url: fake.url, token: 'secret', transferId });
+    assert.equal((await terminal(manager, transferId)).phase, 'uploaded');
+  } finally { manager.close(); await fake.close(); temp.clean(); }
 });
 
 test('upload idle timeout fails, and cancelling a partial upload can retry successfully', async () => {

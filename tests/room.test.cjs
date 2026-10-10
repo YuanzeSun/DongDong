@@ -83,7 +83,7 @@ test('actions require an online peer, obsolete delivery events are rejected, and
   } finally { await closeRoom(ctx); }
 });
 
-test('profile persists and guest leave releases pairing; reconnect keeps identity and history excludes actions', async () => {
+test('profile persists and guest leave releases pairing; reconnect keeps identity and message history', async () => {
   const ctx = await setup('hello-pet-reconnect-');
   try {
     const host = await ctx.session('host', 'host', '甲'); let guest = await ctx.session('guest', 'join', '乙');
@@ -419,4 +419,35 @@ test('leaving revokes a progress request whose JSON body was already being recei
     assert.equal(transfers[0].phase, 'cancelled');
     assert.equal((await postJson(ctx, 'transfers', guest, { transferId: 'after-leave', name: 'next.txt', phase: 'uploading' })).status, 200);
   } finally { request?.destroy(); await closeRoom(ctx); }
+});
+
+
+test('online actions stay in both histories; offline actions are rejected and never replayed to the peer', async () => {
+  const ctx = await setup('dongdong-action-history-');
+  try {
+    const host = await ctx.session('host', 'host', '甲');
+    const guest = await ctx.session('guest', 'join', '乙');
+    const hs = await openSocket(ctx, host);
+    const gs = await openSocket(ctx, guest);
+    const received = waitFor(gs, message => message.type === 'event' && message.event.kind === 'pet');
+    const response = await postJson(ctx, 'events', host, { kind: 'pet', clientId: 'pet-once' });
+    assert.equal(response.status, 201);
+    const action = await response.json();
+    assert.equal((await received).event.id, action.id);
+    assert.equal((await postJson(ctx, 'events', host, { kind: 'pet', clientId: 'pet-once' })).status, 200);
+    for (const session of [host, guest]) {
+      const history = await (await fetch(`${ctx.base}/api/events`, { headers: sessionHeaders(session) })).json();
+      assert.deepEqual(history.map(event => event.kind), ['pet']);
+      assert.equal(history[0].senderName, '甲');
+    }
+    assert.equal((await postJson(ctx, 'events', host, { kind: 'sit' })).status, 400);
+    assert.equal((await postJson(ctx, 'events', host, { kind: 'care' })).status, 400);
+    const closed = new Promise(resolve => gs.once('close', resolve));
+    gs.close(); await closed;
+    assert.equal((await postJson(ctx, 'events', host, { kind: 'fish', clientId: 'offline-fish' })).status, 409);
+    const rejoined = await ctx.session('guest', 'join', '乙');
+    const history = await (await fetch(`${ctx.base}/api/events`, { headers: sessionHeaders(rejoined) })).json();
+    assert.deepEqual(history.map(event => event.kind), ['pet']);
+    hs.close();
+  } finally { await closeRoom(ctx); }
 });

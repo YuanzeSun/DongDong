@@ -87,33 +87,80 @@ function clampBounds(bounds, area) {
   };
 }
 
-function planWalkPath(bounds, area, random = Math.random) {
+function planWalkTimeline(bounds, area, random = Math.random) {
   const left = area.x;
-  const right = area.x + area.width - bounds.width;
+  const right = Math.max(left, area.x + area.width - bounds.width);
   const top = area.y;
-  const bottom = area.y + area.height - bounds.height;
-  if (right - left < 48) return [];
-  let x = Math.max(left, Math.min(right, bounds.x));
-  let y = Math.max(top, Math.min(bottom, bounds.y));
-  const leftRoom = x - left;
-  const rightRoom = right - x;
-  const firstDirection = Math.min(leftRoom, rightRoom) < 110
-    ? (rightRoom > leftRoom ? 1 : -1)
-    : (random() < 0.5 ? -1 : 1);
-  const points = [];
-  for (const [index, baseDistance] of [95, 65, 105, 55].entries()) {
-    let direction = index % 2 ? -firstDirection : firstDirection;
-    let room = direction > 0 ? right - x : x - left;
-    if (room < 24) {
-      direction *= -1;
-      room = direction > 0 ? right - x : x - left;
+  const bottom = Math.max(top, area.y + area.height - bounds.height);
+  const segments = [];
+  let totalMs = 0;
+  let from = { x: Math.max(left, Math.min(right, bounds.x)), y: Math.max(top, Math.min(bottom, bounds.y)) };
+  if (Math.max(right - left, bottom - top) < 48) return { segments, totalMs };
+  const count = 3 + Math.floor(random() * 2);
+  const weights = Array.from({ length: count }, () => .8 + random() * .4);
+  const pauses = weights.map(() => 650 + Math.round(random() * 650));
+  const travelBudget = 18000 + random() * 6000 - pauses.reduce((sum, pause) => sum + pause, 0);
+  const weightSum = weights.reduce((sum, weight) => sum + weight, 0);
+  const reflect = (value, min, max) => {
+    if (max === min) return min;
+    const span = max - min;
+    const offset = ((value - min) % (span * 2) + span * 2) % (span * 2);
+    return min + Math.min(offset, span * 2 - offset);
+  };
+  let heading = random() * Math.PI * 2;
+  for (let index = 0; index < count; index++) {
+    const travelMs = Math.round(travelBudget * weights[index] / weightSum);
+    const distance = (35 + random() * 10) * .8 * travelMs / 1200;
+    let to;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (index || attempt) heading += (random() < .5 ? -1 : 1) * (.45 + random() * 1.1);
+      to = {
+        x: reflect(from.x + Math.cos(heading) * distance, left, right),
+        y: reflect(from.y + Math.sin(heading) * distance, top, bottom)
+      };
+      const previous = segments.at(-1)?.from;
+      if (Math.hypot(to.x - from.x, to.y - from.y) >= Math.min(45, distance * .5)
+        && (!previous || Math.hypot(to.x - previous.x, to.y - previous.y) >= 35)) break;
     }
-    if (room < 24) break;
-    x += direction * Math.min(room, baseDistance + Math.round(random() * 25));
-    y = Math.max(top, Math.min(bottom, y + [0, -12, 18, -6][index]));
-    points.push({ x: Math.round(x), y: Math.round(y) });
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const bend = (.15 + random() * .15) * (random() < .5 ? -1 : 1);
+    const control = {
+      x: Math.max(left, Math.min(right, (from.x + to.x) / 2 - dy * bend)),
+      y: Math.max(top, Math.min(bottom, (from.y + to.y) / 2 + dx * bend))
+    };
+    // The quadratic derivative is bounded by 1.2 * chord length.  Reserving
+    // 20% for easing caps the actual curved motion at the chosen 35-45 px/s.
+    const pauseMs = pauses[index];
+    segments.push({ from, control, to, travelMs, pauseMs });
+    totalMs += travelMs + pauseMs;
+    from = to;
+    heading = Math.atan2(dy, dx);
   }
-  return points;
+  return { segments, totalMs };
+}
+
+function walkPositionAt(timeline, elapsedMs) {
+  if (!timeline.segments.length) return null;
+  let elapsed = Math.max(0, elapsedMs);
+  for (const { from, control, to, travelMs, pauseMs } of timeline.segments) {
+    if (elapsed <= travelMs + pauseMs) {
+      const t = Math.min(1, elapsed / travelMs);
+      const progress = t < .2 ? t * t / .32 : t > .8 ? 1 - (1 - t) ** 2 / .32 : (t - .1) / .8;
+      const remaining = 1 - progress;
+      const dx = 2 * (remaining * (control.x - from.x) + progress * (to.x - control.x));
+      const dy = 2 * (remaining * (control.y - from.y) + progress * (to.y - control.y));
+      return {
+        x: remaining * remaining * from.x + 2 * remaining * progress * control.x + progress * progress * to.x,
+        y: remaining * remaining * from.y + 2 * remaining * progress * control.y + progress * progress * to.y,
+        direction: Math.abs(dx) > Math.hypot(dx, dy) * .1 ? Math.sign(dx) : 0,
+        pace: Math.min(1, t / .2, (1 - t) / .2),
+        done: false
+      };
+    }
+    elapsed -= travelMs + pauseMs;
+  }
+  return { ...timeline.segments.at(-1).to, direction: 0, pace: 0, done: true };
 }
 
 function tailnetPeers(status) {
@@ -131,4 +178,11 @@ function tailnetPeers(status) {
     .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
 }
 
-module.exports = { downloadName, saveResponseDownload, clampBounds, planWalkPath, tailnetPeers };
+module.exports = {
+  downloadName,
+  saveResponseDownload,
+  clampBounds,
+  planWalkTimeline,
+  walkPositionAt,
+  tailnetPeers
+};

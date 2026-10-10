@@ -39,13 +39,13 @@ async function uploadFile(job, { signal, idleTimeoutMs, maximumBytes, onProgress
       response.on('end', () => {
         try {
           const event = JSON.parse(body);
-          if (response.statusCode < 200 || response.statusCode >= 300) throw new Error(event.error || '文件发送失败');
+          if (response.statusCode < 200 || response.statusCode >= 300) throw Object.assign(new Error(event.error || '文件发送失败'), { status: response.statusCode });
           if (!event || typeof event.fileId !== 'string' || !event.fileId) throw new Error('服务器未确认文件已上传');
           resolve(event);
         } catch (error) { reject(error); }
       });
     });
-    request.setTimeout(idleTimeoutMs, () => request.destroy(new Error('传输超时，可重试')));
+    request.setTimeout(idleTimeoutMs, () => request.destroy(Object.assign(new Error('传输超时，可重试'), { code: 'ETIMEDOUT' })));
     request.on('error', reject);
     const source = fs.createReadStream(job.path);
     async function* parts() {
@@ -63,7 +63,8 @@ async function uploadFile(job, { signal, idleTimeoutMs, maximumBytes, onProgress
 }
 
 function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 * 1024 * 1024,
-  idleTimeoutMs = 30000, totalTimeoutMs = 10 * 60 * 1000, receiptRetryMs = 1000, now = Date.now }) {
+  idleTimeoutMs = 30000, totalTimeoutMs = 10 * 60 * 1000, receiptRetryMs = 1000,
+  now = Date.now, onDiagnostic = () => {} }) {
   const jobs = new Map();
   const roomSessions = new Map();
   const terminalPhases = new Set(['saved', 'failed', 'cancelled']);
@@ -86,8 +87,23 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
     }
   }
   function localUpdate(job, phase, progress = job.progress) {
+    const changed = job.phase !== phase;
     job.phase = phase; job.progress = progress; job.updatedAt = now();
+    if (changed && (phase === 'uploaded' || terminalPhases.has(phase))) {
+      diagnostic('transfer-finish', { transferId: job.transferId, direction: job.direction, phase, ...job.failure });
+    }
     if (!job.forgotten) onProgress(publicJob(job));
+  }
+  function diagnostic(event, details) {
+    try { onDiagnostic(event, details); } catch { /* Diagnostics must not affect transfers. */ }
+  }
+  function failureDetails(error, cancelled, timedOut) {
+    const code = error?.code || error?.cause?.code;
+    const status = error?.status;
+    const category = cancelled ? 'cancelled' : timedOut || code === 'ETIMEDOUT' || error?.name === 'TimeoutError' ? 'timeout'
+      : status ? 'http' : ['EACCES', 'EPERM', 'ENOSPC', 'ENOENT', 'EIO', 'EMFILE', 'ENFILE', 'EROFS'].includes(code) ? 'filesystem'
+        : code ? 'network' : 'unknown';
+    return { category, name: error?.name, code, status };
   }
   function writeStatus(job, payload) {
     const signals = [AbortSignal.timeout(2000)];
@@ -154,6 +170,8 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
   function run(job) {
     if (job.controller) return job.promise;
     ensureTransferSlot(job);
+    diagnostic('transfer-start', { transferId: job.transferId, direction: job.direction });
+    job.failure = undefined;
     job.controller = new AbortController(); job.error = '';
     job.cancelRequested = false;
     job.serverPhase = '';
@@ -183,9 +201,10 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
           try {
             resetIdle();
             const response = await fetch(`${job.roomUrl}/api/files/${job.fileId}`, { headers: { 'X-Pet-Session': job.token }, signal: AbortSignal.any([signal, idle.signal]) });
+            if (!response.ok) throw Object.assign(new Error('文件下载失败'), { status: response.status });
             job.savedPath = await saveResponseDownload(downloadsPath(), response, job.name, maximumBytes,
               (loaded, total) => { resetIdle(); progress(total ? loaded / total * 100 : 0); });
-          } catch (error) { if (idle.signal.aborted) throw new Error('传输超时，可重试'); throw error; }
+          } catch (error) { if (idle.signal.aborted) throw Object.assign(new Error('传输超时，可重试'), { code: 'ETIMEDOUT' }); throw error; }
           finally { clearTimeout(idleTimer); }
           await publish(job, 'saved', 100);
         }
@@ -193,6 +212,7 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
         if (job.forgotten) return;
         const cancelled = job.cancelRequested || job.controller.signal.aborted;
         job.error = cancelled ? '已取消' : signal.aborted ? '传输超时，可重试' : error.message;
+        job.failure = terminalPhases.has(job.serverPhase) ? { category: 'peer' } : failureDetails(error, cancelled, signal.aborted);
         if (terminalPhases.has(job.serverPhase)) { job.error = job.serverError || ''; localUpdate(job, job.serverPhase); }
         // A lost reservation response may already have occupied the room's slot.
         else if (job.reserved || !error.status || error.status >= 500) await publish(job, cancelled ? 'cancelled' : 'failed');
@@ -230,7 +250,7 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
     if (!job || terminalPhases.has(job.phase)) return false;
     if (job.controller) { job.cancelRequested = true; job.controller.abort(); }
     else if (isPendingSend(job)) {
-      job.cancelRequested = true; job.error = '已取消'; publish(job, 'cancelled');
+      job.cancelRequested = true; job.error = '已取消'; job.failure = { category: 'cancelled' }; publish(job, 'cancelled');
     } else return false;
     return true;
   }
@@ -284,6 +304,7 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
       if (job.direction === 'send' && ['uploaded', 'downloading', 'saved', 'failed', 'cancelled'].includes(item.phase)) {
         job.serverPhase = item.phase;
         job.serverError = item.error || '';
+        job.failure = ['failed', 'cancelled'].includes(item.phase) ? { category: 'peer' } : undefined;
         if (terminalPhases.has(item.phase)) job.controller?.abort();
         job.error = item.error || '';
         localUpdate(job, item.phase, item.progress);
@@ -301,6 +322,10 @@ function createTransferManager({ downloadsPath, onProgress, maximumBytes = 100 *
         job.pendingReceipt = null;
         job.receiptTimer = null;
         job.forgotten = true;
+        if (!terminalPhases.has(job.phase)) {
+          job.failure = { category: 'cancelled' };
+          localUpdate(job, 'cancelled');
+        }
         job.controller?.abort();
         jobs.delete(key);
       }

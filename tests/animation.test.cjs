@@ -3,7 +3,7 @@ const test = require('node:test');
 const { ACTIONS, sample, normalize } = require('../public/mascot-animator.js');
 
 test('interactive actions have distinct articulated frames', () => {
-  for (const action of ['wave', 'fish', 'stretch', 'groom', 'hug', 'kiss', 'pet', 'sit', 'happy', 'jump', 'delivery', 'receive']) {
+  for (const action of ['wave', 'fish', 'stretch', 'groom', 'hug', 'kiss', 'pet', 'jump', 'delivery', 'receive']) {
     const frames = Array.from({ length: ACTIONS[action].frames }, (_, index) => sample(action, index));
     const unique = new Set(frames.map(frame => JSON.stringify(frame)));
     assert.ok(frames.length >= 20, `${action} needs a full animation sequence`);
@@ -15,7 +15,7 @@ test('interactive actions have distinct articulated frames', () => {
 test('finished gestures lower their paws and settle into idle before switching poses', () => {
   const idle = sample('idle', 0);
   const parts = ['bx', 'by', 'hx', 'hy', 'lx', 'ly', 'rx', 'ry', 'rlx', 'rly', 'rrx', 'rry', 'tx', 'ty', 'sy'];
-  for (const action of ['wave', 'fish', 'stretch', 'groom', 'hug', 'kiss', 'pet', 'happy', 'jump', 'delivery', 'receive', 'blink', 'wake', 'loaf-rise', 'nest-rise']) {
+  for (const action of ['wave', 'fish', 'stretch', 'groom', 'hug', 'kiss', 'pet', 'jump', 'delivery', 'receive', 'wake', 'loaf-rise', 'nest-rise']) {
     const last = ACTIONS[action].frames - 1;
     const end = sample(action, last);
     for (const part of [...parts, 'tail', 'eye', 'mouth', 'prop']) {
@@ -36,6 +36,27 @@ test('sleep wakes before standing, and walk changes leg positions', () => {
   assert.equal(normalize('nap'), 'sleep');
 });
 
+test('walk has a full, eased four-paw gait instead of a four-frame metronome', () => {
+  const frames = Array.from({ length: ACTIONS.walk.frames }, (_, index) => sample('walk', index));
+  const unique = new Set(frames.map(frame => JSON.stringify(frame)));
+  assert.ok(ACTIONS.walk.frames >= 40);
+  assert.ok(unique.size >= 30, 'walk should visibly change throughout the cycle');
+  assert.ok(new Set(frames.map(frame => frame.tail)).size >= 4, 'tail should counterbalance the steps');
+  assert.ok(new Set(frames.map(frame => frame.hx)).size >= 3, 'head should have a subtle independent sway');
+  assert.ok(frames.some(frame => frame.by < -1), 'body should rise during a stride');
+  for (const frame of frames) {
+    const lifted = [frame.ly, frame.ry, frame.rly, frame.rry].filter(value => value < -1.5).length;
+    assert.ok(lifted <= 1, 'walk should keep three paws supporting the body');
+  }
+  for (let index = 1; index < frames.length; index++) {
+    const previous = frames[index - 1];
+    const current = frames[index];
+    for (const part of ['by', 'hy', 'hx', 'lx', 'ly', 'rx', 'ry', 'rlx', 'rly', 'rrx', 'rry', 'tx', 'ty']) {
+      assert.ok(Math.abs(current[part] - previous[part]) <= 2, `walk snaps ${part}`);
+    }
+  }
+});
+
 test('resting poses and purr use distinct silhouettes and rise transitions', () => {
   assert.equal(sample('loaf', 0).loafArt, true);
   assert.equal(sample('purr', 0).loafArt, true);
@@ -52,17 +73,4 @@ test('resting poses and purr use distinct silhouettes and rise transitions', () 
   assert.equal(sample('sleep', ACTIONS.sleep.frames - 1).sleepArt, true);
   assert.equal(sample('nest', ACTIONS.nest.frames - 1).bedArt, true);
   assert.equal(sample('loaf', ACTIONS.loaf.frames - 1).loafArt, true);
-  assert.ok(sample('sit', ACTIONS.sit.frames - 1).by > sample('idle', 0).by, 'sitting keeps its lowered resting pose');
-});
-
-test('sitting rises through a separate return animation', () => {
-  const idle = sample('idle', 0);
-  const rise = sample('sit-rise', 0);
-  const middle = sample('sit-rise', 8);
-  const end = sample('sit-rise', ACTIONS['sit-rise'].frames - 1);
-  assert.ok(rise.by > idle.by);
-  assert.ok(middle.by < rise.by);
-  assert.equal(end.by, idle.by);
-  assert.equal(end.hy, idle.hy);
-  assert.equal(end.tail, idle.tail);
 });

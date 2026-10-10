@@ -5,11 +5,14 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { createRoom } = require('../server/room.cjs');
-const { clampBounds, planWalkPath, tailnetPeers } = require('./native-helpers.cjs');
+const { clampBounds, planWalkTimeline, walkPositionAt, tailnetPeers } = require('./native-helpers.cjs');
 const { createTransferManager } = require('./transfer-manager.cjs');
+const { createDiagnostics } = require('./diagnostics.cjs');
 
 const PORT = 4827;
 const execFileAsync = promisify(execFile);
+let diagnostics;
+process.on('uncaughtExceptionMonitor', error => diagnostics?.write('main-error', { name: error?.name, code: error?.code }));
 async function tailscaleStatus() {
   const commands = process.platform === 'win32'
     ? ['tailscale.exe', path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Tailscale', 'tailscale.exe'), path.join(process.env.LOCALAPPDATA || '', 'Tailscale', 'tailscale.exe')]
@@ -45,7 +48,13 @@ else {
   // a panel must never hide the mascot, and closing the mascot must not tear down a panel.
   const panelWindows = new Map();
   const ownsCat = event => window && !window.isDestroyed() && event.sender === window.webContents;
-  const transferManager = createTransferManager({ downloadsPath, onProgress: reportTransfer });
+  const ownsWindow = event => event.senderFrame === event.sender.mainFrame
+    && (ownsCat(event) || [...panelWindows.values()].some(panel => !panel.isDestroyed() && event.sender === panel.webContents));
+  const transferManager = createTransferManager({
+    downloadsPath,
+    onProgress: reportTransfer,
+    onDiagnostic: (event, details) => diagnostics?.write(event, details)
+  });
   function reportTransfer(details) {
     for (const panel of [window, ...panelWindows.values()]) if (panel && !panel.isDestroyed()) panel.webContents.send('transfer-progress', details);
   }
@@ -55,7 +64,10 @@ else {
     const wasWalking = Boolean(walkTimer);
     walkTimer = null;
     walkMotionId = null;
-    if (wasWalking && window && !window.isDestroyed()) window.webContents.send('walk-state', false, motionId);
+    if (wasWalking && window && !window.isDestroyed()) {
+      window.webContents.send('walk-pace', 0, motionId);
+      window.webContents.send('walk-state', false, motionId);
+    }
   }
   function stopJump() {
     if (jumpTimer) clearInterval(jumpTimer);
@@ -97,28 +109,24 @@ else {
     if (!window || window.isDestroyed()) return false;
     stopJump();
     stopWalk();
-    const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
-    const path = planWalkPath(bounds, area); if (!path.length) return false;
+    const bounds = window.getBounds();
+    const timeline = planWalkTimeline(bounds, screen.getDisplayMatching(bounds).workArea);
+    if (!timeline.segments.length) return false;
     walkMotionId = motionId;
-    let targetIndex = 0;
+    const startedAt = performance.now();
+    let lastDirection = 0;
     window.webContents.send('walk-state', true, motionId);
-    window.webContents.send('walk-direction', Math.sign(path[0].x - bounds.x), motionId);
     walkTimer = setInterval(() => {
       if (!window || window.isDestroyed()) return stopWalk();
-      const [x, y] = window.getPosition();
-      const target = path[targetIndex];
-      const dx = target.x - x;
-      const dy = target.y - y;
-      const distance = Math.hypot(dx, dy);
-      if (distance <= 5) {
-        window.setPosition(target.x, target.y, false);
-        targetIndex += 1;
-        if (targetIndex === path.length) return stopWalk();
-        window.webContents.send('walk-direction', Math.sign(path[targetIndex].x - target.x), motionId);
-        return;
+      const step = walkPositionAt(timeline, performance.now() - startedAt);
+      window.setPosition(Math.round(step.x), Math.round(step.y), false);
+      if (step.direction && step.direction !== lastDirection) {
+        lastDirection = step.direction;
+        window.webContents.send('walk-direction', step.direction, motionId);
       }
-      window.setPosition(Math.round(x + dx / distance * 5), Math.round(y + dy / distance * 5), false);
-    }, 30);
+      window.webContents.send('walk-pace', step.pace, motionId);
+      if (step.done) stopWalk();
+    }, 33);
     return true;
   }
   function startJump(motionId) {
@@ -172,6 +180,14 @@ else {
   }
   function showWindow() { if (!window || window.isDestroyed()) return; window.show(); window.focus(); window.webContents.send('menu-action', 'show'); }
   function quitApp() { isQuitting = true; stopWalk(); stopJump(); for (const panel of panelWindows.values()) if (!panel.isDestroyed()) panel.close(); panelWindows.clear(); if (room) room.close().catch(() => {}); app.quit(); }
+  function observeRenderer(view) {
+    view.webContents.on('render-process-gone', (_event, details) => diagnostics?.write('renderer-crash', details));
+    view.webContents.on('unresponsive', () => diagnostics?.write('renderer-unresponsive'));
+    view.webContents.on('responsive', () => diagnostics?.write('renderer-responsive'));
+    view.webContents.on('did-fail-load', (_event, code, _description, _validatedUrl, isMainFrame) => {
+      diagnostics?.write('renderer-load-error', { code, isMainFrame });
+    });
+  }
   function panelKind(value) {
     const kind = String(value || '').toLowerCase();
     if (!['chat', 'settings'].includes(kind)) throw new Error('辅助窗口类型无效');
@@ -203,6 +219,7 @@ else {
         additionalArguments: [`--dongdong-panel=${kind}`]
       }
     });
+    observeRenderer(panel);
     panelWindows.set(kind, panel);
     panel.once('ready-to-show', () => { if (!panel.isDestroyed()) panel.show(); });
     panel.on('closed', () => { if (panelWindows.get(kind) === panel) panelWindows.delete(kind); });
@@ -221,10 +238,13 @@ else {
   }
   function createWindow() {
     window = new BrowserWindow({ width: 420, height: 700, minWidth: 138, minHeight: 176, icon: path.join(__dirname, '..', 'assets', 'icon.png'), frame: false, transparent: true, alwaysOnTop: true, resizable: false, hasShadow: false, skipTaskbar: false, backgroundColor: '#00000000', show: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    observeRenderer(window);
     window.loadFile(path.join(__dirname, '..', 'public', 'index.html')); window.on('close', event => { if (!isQuitting) { event.preventDefault(); window.hide(); } }); window.on('closed', () => { stopWalk(); stopJump(); window = null; }); window.on('move', clampWindow);
   }
   app.on('second-instance', showWindow);
   app.whenReady().then(() => {
+    diagnostics = createDiagnostics({ logsPath: app.getPath('logs') });
+    diagnostics.write('app-start', { version: app.getVersion(), platform: process.platform, arch: process.arch });
     initializeAutoLaunch();
     ipcMain.handle('addresses', () => tailscaleAddresses());
     let hostOperation = Promise.resolve();
@@ -235,7 +255,7 @@ else {
         if (!address) throw new Error('没有找到这个 Tailscale 地址，请确认 Tailscale 已连接');
         if (room?.server.listening && room.server.address()?.address === address) return { url: `http://${address}:${PORT}` };
         if (room) await room.close();
-        room = createRoom({ host: address, port: PORT, hostId: String(senderId || ''), dataDir: path.join(app.getPath('userData'), 'room-v4'), staticDir: path.join(__dirname, '..', 'public') });
+        room = createRoom({ host: address, port: PORT, hostId: String(senderId || ''), dataDir: path.join(app.getPath('userData'), 'room-v4'), staticDir: path.join(__dirname, '..', 'public'), onDiagnostic: (event, details) => diagnostics?.write(event, details) });
         try { await room.listen(); } catch (error) { room = null; throw error; }
         return { url: `http://${address}:${PORT}` };
       };
@@ -292,10 +312,12 @@ else {
       shell.showItemInFolder(localPath); return true;
     });
     ipcMain.handle('open-downloads', () => shell.openPath(downloadsPath()));
+    ipcMain.handle('open-logs', event => ownsWindow(event) ? shell.openPath(app.getPath('logs')) : false);
+    ipcMain.on('renderer-diagnostic', (event, payload) => { if (ownsWindow(event)) diagnostics?.renderer(payload); });
     ipcMain.handle('get-auto-launch', () => app.getLoginItemSettings().openAtLogin); ipcMain.handle('set-auto-launch', (_event, enabled) => { app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true }); saveAutoLaunchPreference(enabled); return app.getLoginItemSettings().openAtLogin; });
     ipcMain.handle('notify', (_event, title, body) => { if (Notification.isSupported()) new Notification({ title: String(title), body: String(body).slice(0, 140) }).show(); }); ipcMain.handle('close-window', () => window?.hide()); ipcMain.handle('quit-app', quitApp);
     createTray(); createWindow();
   });
   powerMonitor.on('resume', () => { for (const view of [window, ...panelWindows.values()]) if (view && !view.isDestroyed()) view.webContents.send('system-resume'); });
-  app.on('activate', showWindow); app.on('before-quit', () => { isQuitting = true; transferManager.close(); stopWalk(); stopJump(); }); app.on('window-all-closed', event => { if (!isQuitting && process.platform !== 'darwin') event.preventDefault(); });
+  app.on('activate', showWindow); app.on('before-quit', () => { diagnostics?.write('app-quit', { reason: isQuitting ? 'user' : 'shutdown' }); isQuitting = true; transferManager.close(); stopWalk(); stopJump(); diagnostics?.close(); }); app.on('window-all-closed', event => { if (!isQuitting && process.platform !== 'darwin') event.preventDefault(); });
 }

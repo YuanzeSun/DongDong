@@ -53,7 +53,7 @@ function renderer(panelKind = '') {
   // Exercise the real connection, presence, and timer code while suppressing
   // unrelated rendering and file effects at this boundary.
   run(`setView = setExpanded = startCatActivity = setQuickComposer = setActionTray = applyProfile = () => {};
-    transitionPose = () => {}; scheduleIdleAction = () => {}; loadTransferSnapshot = async () => {};
+    transitionPose = () => {}; loadTransferSnapshot = async () => {};
     cancelRoomTransfers = () => {};`);
   return { context, run, elements, timers, sockets, environment, storage, listeners, async retry() {
     const id = run('state.reconnectTimer');

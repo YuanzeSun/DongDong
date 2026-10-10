@@ -11,6 +11,7 @@ function renderer() {
   const timers = new Map();
   const calls = [];
   let nextTimer = 0;
+  let clock = 0;
   const context = vm.createContext({
     window: { petDesktop: {
       startWalk: () => { calls.push('walk'); return true; },
@@ -31,88 +32,121 @@ function renderer() {
     } },
     localStorage: { getItem: () => null, setItem() {} },
     crypto: { randomUUID: () => 'idle-test' },
-    setTimeout(callback, delay) { timers.set(++nextTimer, { callback, delay }); return nextTimer; },
+    Date: class extends Date { static now() { return clock; } },
+    setTimeout(callback, delay) { timers.set(++nextTimer, { callback, delay, due: clock + delay }); return nextTimer; },
     clearTimeout: id => timers.delete(id),
     setInterval() {}, clearInterval() {}
   });
   const run = code => vm.runInContext(code, context);
   run(source.slice(0, source.lastIndexOf('\ninit().catch(')));
   run('state.connected = state.peerOnline = state.edgeHideEnabled = true; state.expanded = false;');
-  return { run, calls, timers, elements };
+  function advance(ms) {
+    const target = clock + ms;
+    for (let count = 0; count < 100; count++) {
+      const next = [...timers].filter(([, timer]) => timer.due <= target).sort((a, b) => a[1].due - b[1].due)[0];
+      if (!next) { clock = target; return; }
+      clock = next[1].due;
+      timers.delete(next[0]);
+      next[1].callback();
+    }
+    throw new Error('Unexpected recurring idle activity');
+  }
+  return { run, calls, timers, elements, advance };
 }
 
 for (const control of ['setQuickComposer', 'setActionTray']) {
-  test(`${control} pauses automatic walking and resumes after a fresh idle delay`, () => {
+  test(`${control} suspends edge hiding and restarts its full idle delay when closed`, () => {
     const page = renderer();
-    page.run("startMotion('walk', true); onMotionState('walk', true);");
-    assert.deepEqual(page.calls, ['walk']);
-    page.run(`${control}(true);`);
-    assert.deepEqual(page.calls, ['walk', 'stop-walk']);
-    assert.equal(page.run('state.walking'), false);
-    page.run('scheduleIdleAction(); schedulePeek();');
-    assert.equal(page.timers.has(page.run('state.idleTimer')), false);
-    assert.equal(page.timers.has(page.run('peekTimer')), false);
-    page.run(`${control}(false);`);
-    assert.ok(page.timers.get(page.run('state.idleTimer')).delay >= 28000);
-    assert.ok(page.timers.get(page.run('peekTimer')).delay >= 70000);
-    assert.deepEqual(page.calls, ['walk', 'stop-walk']);
+    page.run('schedulePeek()');
+    page.advance(60000);
+    page.run(`${control}(true)`);
+    page.advance(300000);
+    assert.equal(page.run('state.peeked'), false);
+    assert.deepEqual(page.calls, []);
+    page.run(`${control}(false)`);
+    page.advance(69999);
+    assert.equal(page.run('state.peeked'), false);
+    page.advance(50001);
+    assert.equal(page.run('state.peeked'), true);
+    assert.deepEqual(page.calls, ['hide']);
   });
 }
 
-test('opening one control while the other stays open does not resume automatic activity', () => {
+test('closing one control while the other stays open cannot resume edge hiding', () => {
   const page = renderer();
-  page.run('setQuickComposer(true); setActionTray(true); setActionTray(false);');
-  assert.equal(page.timers.has(page.run('state.idleTimer')), false);
-  assert.equal(page.timers.has(page.run('peekTimer')), false);
+  page.run('setQuickComposer(true); setActionTray(true); setActionTray(false)');
+  page.advance(300000);
+  assert.equal(page.run('state.peeked'), false);
+  assert.deepEqual(page.calls, []);
 });
 
-test('controls cancel edge outings and stale timers cannot hide or move the cat', () => {
+test('opening controls reveals an edge-hidden cat and rejects a stale hide callback', () => {
   const page = renderer();
-  page.run('scheduleIdleAction(); schedulePeek();');
-  const idle = page.timers.get(page.run('state.idleTimer')).callback;
+  page.run('schedulePeek()');
   const hide = page.timers.get(page.run('peekTimer')).callback;
-  page.run('state.peeked = true; schedulePeekOuting();');
-  const outing = page.timers.get(page.run('peekOutingTimer')).callback;
-  page.run('setQuickComposer(true);');
-  idle(); hide(); outing();
+  page.run('state.peeked = true; setQuickComposer(true)');
+  hide();
+  page.advance(300000);
   assert.equal(page.run('state.peeked'), false);
   assert.deepEqual(page.calls, ['reveal']);
-  page.run('state.edgeAutoOuting = true; finishPeekOuting();');
+});
+
+test('long online inactivity keeps the cat idle without starting a pose or movement', () => {
+  const page = renderer();
+  page.run('state.edgeHideEnabled = false; startCatActivity()');
+  page.advance(3600000);
+  assert.equal(page.run('state.pose'), 'idle');
+  assert.equal(page.run('state.walking || state.jumping'), false);
+  assert.deepEqual(page.calls, []);
+  assert.equal(page.timers.size, 0);
+});
+
+test('an edge-hidden cat stays there until interaction, then gets a fresh stay before hiding', () => {
+  const page = renderer();
+  page.run('Math.random = () => 0; startCatActivity()');
+  page.advance(70000);
+  assert.equal(page.run('state.peeked'), true);
+  page.advance(3600000);
+  assert.deepEqual(page.calls, ['hide']);
+  page.run('unpeek(true)');
   assert.equal(page.run('state.peeked'), false);
+  page.advance(249999);
+  assert.equal(page.run('state.peeked'), false);
+  page.advance(1);
+  assert.equal(page.run('state.peeked'), true);
+  assert.deepEqual(page.calls, ['hide', 'reveal', 'hide']);
 });
 
-test('opening controls during a wake-up cancels the pending automatic walk', () => {
+test('a normal interaction restarts the edge-hide timer before the cat has hidden', () => {
   const page = renderer();
-  page.run("state.pose = 'nap'; startMotion('walk', true);");
-  page.run('setQuickComposer(true);');
-  const waking = page.timers.get(page.run('wakeTimer'));
-  waking.callback();
-  assert.equal(page.calls.includes('walk'), false);
+  page.run('Math.random = () => 0; schedulePeek()');
+  page.advance(60000);
+  page.run('unpeek(true)');
+  page.advance(69999);
+  assert.equal(page.run('state.peeked'), false);
+  page.advance(1);
+  assert.equal(page.run('state.peeked'), true);
 });
 
-test('a normal interaction restarts the edge-hide timer when the cat was not already hidden', () => {
+test('offline sleep still follows presence changes without recurring idle actions', () => {
   const page = renderer();
-  page.run('state.peeked = false; state.edgeAutoOuting = false; unpeek(true);');
-  assert.ok(page.run('peekTimer'));
-  assert.ok(page.timers.get(page.run('peekTimer')).delay >= 70000);
-});
-
-test('an edge outing wakes a resting cat before changing its pose', () => {
-  const page = renderer();
-  page.run("Math.random = () => 0.5; state.peeked = true; state.pose = 'nest'; schedulePeekOuting();");
-  const outing = page.timers.get(page.run('peekOutingTimer')).callback;
-  outing();
-  assert.equal(page.run('state.edgeAutoOuting'), true);
-  assert.equal(page.run('state.pose'), 'nest');
-  const wake = page.timers.get(page.run('wakeTimer')).callback;
-  wake();
-  assert.equal(page.run('state.pose'), 'stretch');
+  page.run('state.edgeHideEnabled = false; setPeerOnline(false)');
+  page.advance(2999);
+  assert.equal(page.run('state.pose'), 'idle');
+  page.advance(1);
+  assert.equal(page.run('state.pose'), 'nap');
+  page.advance(3600000);
+  assert.equal(page.run('state.pose'), 'nap');
+  assert.deepEqual(page.calls, []);
+  page.run('setPeerOnline(true)');
+  page.advance(600);
+  assert.equal(page.run('state.pose'), 'idle');
 });
 
 test('explicit movement remains available while composing or choosing an action', () => {
   const page = renderer();
-  page.run("setQuickComposer(true); startMotion('walk'); onMotionState('walk', true); setActionTray(true);");
+  page.run("setQuickComposer(true); startMotion('walk'); onMotionState('walk', true); setActionTray(true)");
   assert.deepEqual(page.calls, ['walk']);
-  page.run("startMotion('jump'); onMotionState('jump', true); setQuickComposer(false); setQuickComposer(true);");
+  page.run("startMotion('jump'); onMotionState('jump', true); setQuickComposer(false); setQuickComposer(true)");
   assert.deepEqual(page.calls, ['walk', 'stop-walk', 'jump']);
 });

@@ -1,5 +1,14 @@
 const $ = id => document.getElementById(id);
 const desktop = window.petDesktop;
+window.addEventListener?.('error', event => desktop?.logDiagnostic?.('renderer-error', {
+  kind: 'error', name: event.error?.name, source: event.filename?.split('/').pop(), line: event.lineno
+}));
+window.addEventListener?.('unhandledrejection', event => desktop?.logDiagnostic?.('renderer-error', {
+  kind: 'unhandled-rejection', name: event.reason?.name
+}));
+function logFailure(operation, error) {
+  desktop?.logDiagnostic?.('operation-failed', { operation, status: error?.status, errorName: error?.name });
+}
 const panelKind = desktop?.panelKind || '';
 const panelMode = panelKind === 'chat' || panelKind === 'settings';
 const catAnimator = !panelMode && window.PixelCatAnimator ? new window.PixelCatAnimator($('mainMascot')) : null;
@@ -16,25 +25,23 @@ const state = {
   mode: 'host', url: '', token: '', name: '', socket: null,
   connected: false, roomConnection: 'closed', expanded: false, view: 'chat', peerOnline: false,
   peerName: '对方', profile: {},
-  reconnectTimer: null, idleTimer: null, hostStarted: false, walking: false, jumping: false, pose: 'idle',
-  idleActions: JSON.parse(localStorage.getItem('dongdong-idle-actions') ?? 'true'),
+  reconnectTimer: null, hostStarted: false, walking: false, jumping: false, pose: 'idle',
   edgeHideEnabled: JSON.parse(localStorage.getItem('dongdong-edge-hide') ?? 'false'),
-  peeked: false, edgeHold: false, edgeAutoOuting: false,
+  peeked: false, edgeHold: false,
   notifications: JSON.parse(localStorage.getItem('dongdong-notifications') ?? 'true')
 };
 const seenEvents = new Set();
+const pendingEvents = new Map();
 let poseTimer;
 let napTimer;
-let blinkTimer;
 let wakeTimer;
 let wakeCallback;
 let stanceTimer;
 let voiceTimer;
+let messageAttentionTimer;
 let actionEpoch = 0;
 let motionPendingKind = null;
-let automaticMotion = false;
 let peekTimer;
-let peekOutingTimer;
 let edgeHoldTimer;
 let connectionEpoch = 0;
 let reconnectAttempt = 0;
@@ -48,6 +55,12 @@ const savedFileIds = new Set(JSON.parse(localStorage.getItem(SAVED_FILES_KEY) ||
 const transferStates = new Map();
 const transferRows = new Map();
 const activeTransferAnimations = new Set();
+const LOCAL_ACTIONS_KEY = 'dongdong-unsent-actions';
+const ACTION_TEXT = {
+  wave: '向猫招了招手', walk: '带猫散步了', jump: '让猫蹦跶了', pet: '摸了猫',
+  fish: '给猫喂了小鱼干', sleep: '让猫睡觉了', stretch: '让猫伸懒腰了',
+  hug: '抱了猫', kiss: '亲了猫', groom: '给猫梳毛了', purr: '让猫呼噜了'
+};
 let ignoringMouse = false;
 let lastPointer = null;
 const ACTIONS_LINGER_MS = 2000;
@@ -57,10 +70,33 @@ const mascotDrag = { pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, 
 
 if (panelMode) document.body.classList.add('panel-mode');
 
+function drawSpeechShell() {
+  const bubble = $('speech');
+  if (!bubble.classList.contains('speech-message')) return;
+  const width = bubble.offsetWidth;
+  const height = bubble.offsetHeight - 13;
+  if (!(width > 0 && height > 0)) return;
+  const radius = Math.min(22, (height - 2) / 2);
+  const cat = $('mascotButton');
+  const tail = Math.max(42, Math.min(width - 28, cat.offsetLeft + cat.offsetWidth / 2 - bubble.offsetLeft + 21));
+  $('speechShell').setAttribute('viewBox', `0 0 ${width} ${height + 13}`);
+  // One closed outline: the bottom edge becomes the curved tail, without a seam.
+  $('speechOutline').setAttribute('d', `M ${radius + 1} 1 H ${width - radius - 1}
+    Q ${width - 1} 1 ${width - 1} ${radius + 1} V ${height - radius - 1}
+    Q ${width - 1} ${height - 1} ${width - radius - 1} ${height - 1} H ${tail + 14}
+    C ${tail + 8} ${height - 1} ${tail - 7} ${height + 10} ${tail - 21} ${height + 12}
+    Q ${tail - 24} ${height + 12} ${tail - 21} ${height + 10}
+    C ${tail - 15} ${height + 6} ${tail - 12} ${height - 1} ${tail - 19} ${height - 1}
+    H ${radius + 1} Q 1 ${height - 1} 1 ${height - radius - 1} V ${radius + 1}
+    Q 1 1 ${radius + 1} 1 Z`);
+}
+
 function clearSpeech() {
   clearTimeout(speak.timer);
-  $('speech').classList.remove('speech-pop', 'speech-alert', 'speech-message');
-  $('speech').textContent = '';
+  clearTimeout(messageAttentionTimer);
+  $('speech').classList.remove('speech-pop', 'speech-alert', 'speech-message', 'speech-incoming', 'has-content');
+  $('window').classList.remove('message-received');
+  $('speechContent').textContent = '';
   $('speech').dataset.message = '';
   $('speech').title = '';
   syncMousePassThrough();
@@ -69,17 +105,18 @@ function clearSpeech() {
 function scheduleSpeechDismiss() {
   clearTimeout(speak.timer);
   const bubble = $('speech');
-  if (!bubble.textContent || bubble.classList.contains('speech-message') && bubble.matches(':hover')) return;
+  if (!$('speechContent').textContent || bubble.classList.contains('speech-message') && bubble.matches(':hover')) return;
   speak.timer = setTimeout(clearSpeech, speak.duration);
 }
 
 function scrollSpeech(delta) {
   const bubble = $('speech');
+  const content = $('speechContent');
   if (!bubble.classList.contains('speech-message') || !Number.isFinite(delta)
-    || !Number.isFinite(bubble.scrollHeight) || !Number.isFinite(bubble.clientHeight)
-    || bubble.scrollHeight <= bubble.clientHeight) return;
-  const maximum = bubble.scrollHeight - bubble.clientHeight;
-  bubble.scrollTop = Math.max(0, Math.min(maximum, (Number(bubble.scrollTop) || 0) + delta));
+    || !Number.isFinite(content.scrollHeight) || !Number.isFinite(content.clientHeight)
+    || content.scrollHeight <= content.clientHeight) return;
+  const maximum = content.scrollHeight - content.clientHeight;
+  content.scrollTop = Math.max(0, Math.min(maximum, (Number(content.scrollTop) || 0) + delta));
 }
 
 function openSpeechHistory() {
@@ -97,25 +134,32 @@ function copySpeechMessage() {
   return copySpeechText($('speech').dataset.message);
 }
 
-function speak(message, kind = 'normal') {
+function speak(message, kind = 'normal', incoming = false) {
   if (panelMode) return;
   const bubble = $('speech');
   if (kind !== 'message' && bubble.classList.contains('speech-message')) return;
   clearSpeech();
-  bubble.textContent = message;
-  bubble.scrollTop = 0;
+  $('speechContent').textContent = message;
+  $('speechContent').scrollTop = 0;
+  bubble.classList.add('has-content');
   bubble.classList.toggle('speech-message', kind === 'message');
+  bubble.classList.toggle('speech-incoming', incoming && kind === 'message');
   bubble.dataset.message = kind === 'message' ? message : '';
   bubble.title = kind === 'message' ? '点击查看消息记录，双击复制' : '';
+  drawSpeechShell();
   void bubble.offsetWidth;
   bubble.classList.add(kind === 'alert' ? 'speech-alert' : 'speech-pop');
   speak.duration = kind === 'message' ? Math.min(12000, Math.max(4500, message.length * 110)) : 1800;
+  if (incoming && kind === 'message') {
+    $('window').classList.add('message-received');
+    messageAttentionTimer = setTimeout(() => $('window').classList.remove('message-received'), 2800);
+  }
   scheduleSpeechDismiss();
   syncMousePassThrough();
 }
 
 const ACTION_VOICES = {
-  wave: ['喵～', '喵呜！'], happy: ['喵！', '咪呀！'], jump: ['喵呜！', '咪！'],
+  wave: ['喵～', '喵呜！'], jump: ['喵呜！', '咪！'],
   walk: ['喵～', '咪呜～'], pet: ['呼噜～', '咪～'], fish: ['喵！', '咪呀～'],
   stretch: ['喵嗷～', '哈啊～'], groom: ['咪～', '喵～'], hug: ['咪呜～', '喵～'],
   kiss: ['啾～', '咪！'], purr: ['呼噜噜～', '咕噜咕噜～']
@@ -213,7 +257,6 @@ function transitionPose(pose, onReady = () => {}) {
 
 function interruptMotion() {
   if (panelMode) return;
-  automaticMotion = false;
   const wasWalking = state.walking;
   const wasJumping = state.jumping;
   const pending = motionPendingKind;
@@ -228,28 +271,23 @@ function interruptMotion() {
 function scheduleNap() {
   if (panelMode) return;
   clearTimeout(napTimer);
+  if (!state.connected || state.peerOnline || wakeTimer || state.walking || state.jumping
+    || !['idle', 'nap', 'sleep', 'nest', 'loaf'].includes(state.pose)) return;
   napTimer = setTimeout(() => {
-    if (!state.connected) return;
-    if (activeTransferAnimations.size) return;
-    if (state.peerOnline) {
-      if (['idle', 'loaf'].includes(state.pose)) transitionPose('nest');
-      return scheduleIdleAction();
-    }
+    if (!state.connected || state.peerOnline || activeTransferAnimations.size) return;
     setPose('nap');
-  }, state.peerOnline ? 45000 : Math.max(250, offlineNapDeadline - Date.now()));
+  }, Math.max(250, offlineNapDeadline - Date.now()));
 }
 
 function schedulePeek() {
   if (panelMode) return;
   clearTimeout(peekTimer);
-  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting || catInteractionOpen()) return;
+  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || catInteractionOpen()) return;
   peekTimer = setTimeout(() => {
-    if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || state.edgeAutoOuting || catInteractionOpen()) return schedulePeek();
+    if (!state.edgeHideEnabled || !state.connected || state.expanded || state.walking || state.jumping || state.peeked || state.edgeHold || catInteractionOpen()) return schedulePeek();
     state.peeked = true;
-    clearTimeout(state.idleTimer);
     $('window').classList.add('peeked');
     desktop?.setPeeked(true);
-    schedulePeekOuting();
   }, 70000 + Math.random() * 50000);
 }
 
@@ -259,54 +297,17 @@ function setEdgeHide(enabled) {
   if (panelMode) return;
   if (state.edgeHideEnabled) return schedulePeek();
   clearTimeout(peekTimer);
-  clearTimeout(peekOutingTimer);
   clearTimeout(edgeHoldTimer);
   state.edgeHold = false;
-  state.edgeAutoOuting = false;
   unpeek(false);
-}
-
-function schedulePeekOuting() {
-  if (panelMode) return;
-  clearTimeout(peekOutingTimer);
-  if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold || catInteractionOpen()) return;
-  peekOutingTimer = setTimeout(() => {
-    if (!state.edgeHideEnabled || !state.connected || state.expanded || !state.peeked || state.edgeHold || catInteractionOpen()) return;
-    state.edgeAutoOuting = true;
-    state.peeked = false;
-    $('window').classList.remove('peeked');
-    desktop?.setPeeked(false);
-    const outings = desktop ? ['walk', 'sit', 'stretch', 'nap', 'happy'] : ['sit', 'stretch', 'nap', 'happy'];
-    const outing = outings[Math.floor(Math.random() * outings.length)];
-    if (outing === 'walk' && desktop) {
-      startMotion('walk', true);
-    }
-    else {
-      transitionPose(outing, () => setTimeout(finishPeekOuting, 2400));
-    }
-  }, 90000 + Math.random() * 90000);
-}
-
-function finishPeekOuting() {
-  if (panelMode) return;
-  if (!state.edgeAutoOuting) return;
-  state.edgeAutoOuting = false;
-  if (!state.edgeHideEnabled || !state.connected || state.expanded || state.edgeHold || catInteractionOpen()) return;
-  state.peeked = true;
-  clearTimeout(state.idleTimer);
-  $('window').classList.add('peeked');
-  desktop?.setPeeked(true);
-  schedulePeekOuting();
 }
 
 function unpeek(userInitiated = false) {
   if (panelMode) return;
   clearTimeout(peekTimer);
-  clearTimeout(peekOutingTimer);
-  const wasEdgeState = state.peeked || state.edgeAutoOuting;
+  const wasEdgeState = state.peeked;
   if (userInitiated && wasEdgeState) {
     state.edgeHold = true;
-    state.edgeAutoOuting = false;
     clearTimeout(edgeHoldTimer);
     edgeHoldTimer = setTimeout(() => {
       state.edgeHold = false;
@@ -315,56 +316,19 @@ function unpeek(userInitiated = false) {
     beginAction(finishAction);
   }
   if (!state.peeked) {
-    if (userInitiated) { scheduleIdleAction(); schedulePeek(); }
+    if (userInitiated) schedulePeek();
     return;
   }
   state.peeked = false;
   $('window').classList.remove('peeked');
   desktop?.setPeeked(false);
-  if (userInitiated) { scheduleIdleAction(); schedulePeek(); }
-  else schedulePeek();
-}
-
-function scheduleIdleAction() {
-  if (panelMode) return;
-  clearTimeout(state.idleTimer);
-  if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || !state.idleActions || catInteractionOpen()) return;
-  state.idleTimer = setTimeout(() => {
-    if (!state.connected || !state.peerOnline || state.walking || state.jumping || state.peeked || state.edgeAutoOuting || catInteractionOpen() || !['idle', 'loaf', 'nest'].includes(state.pose)) return scheduleIdleAction();
-    const choices = state.pose === 'idle'
-      ? ['blink', 'happy', 'wiggle', 'sit', 'stretch', 'loaf', 'nest']
-      : ['idle', 'sit', 'stretch', state.pose === 'loaf' ? 'nest' : 'loaf'];
-    if (desktop) choices.push('walk');
-    const action = choices[Math.floor(Math.random() * choices.length)];
-    if (action === 'blink') {
-      setPose('blink');
-      setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, catAnimator?.durationFor('blink') || 260);
-    } else if (action === 'walk' && desktop) {
-      startMotion('walk', true);
-    } else if (['idle', 'loaf', 'nest'].includes(action)) {
-      transitionPose(action);
-    } else if (['sit', 'stretch'].includes(action)) {
-      transitionPose(action, () => setTimeout(() => {
-        if (state.connected && state.pose === action) finishAction();
-      }, (catAnimator?.durationFor(action) || 1800) + 80));
-    } else {
-      animateLocalAction(action);
-    }
-    scheduleIdleAction();
-  }, 28000 + Math.random() * 24000);
+  schedulePeek();
 }
 
 function startCatActivity() {
   if (panelMode) return;
   setPose('idle');
   scheduleNap();
-  clearInterval(blinkTimer);
-  blinkTimer = setInterval(() => {
-    if (!state.connected || state.walking || state.pose !== 'idle') return;
-    setPose('blink');
-    setTimeout(() => { if (state.connected && state.pose === 'blink') setPose('idle'); }, catAnimator?.durationFor('blink') || 170);
-  }, 6800);
-  scheduleIdleAction();
   schedulePeek();
 }
 
@@ -372,6 +336,9 @@ function setPeerOnline(online) {
   const presence = typeof online === 'object' ? online : { online };
   if (state.peerOnline && !presence.online) offlineNapDeadline = Date.now() + 3000;
   if (presence.online) { offlineNapDeadline = 0; clearTimeout(napTimer); }
+  if (!panelMode && state.peerOnline !== Boolean(presence.online)) desktop?.logDiagnostic?.('connection', {
+    state: presence.online ? 'online' : 'offline', mode: state.mode
+  });
   state.peerOnline = Boolean(presence.online);
   state.peerName = presence.peerName || state.peerName || '对方';
   if (!state.peerOnline && !panelMode) {
@@ -384,9 +351,7 @@ function setPeerOnline(online) {
   updateConnectionStatus();
   if (state.peerOnline) {
     if (state.pose === 'nap' || state.pose === 'sleep') transitionPose('idle');
-    scheduleIdleAction();
   } else {
-    clearTimeout(state.idleTimer);
     if (state.connected && !state.walking && !state.jumping) scheduleNap();
   }
 }
@@ -394,7 +359,6 @@ function setPeerOnline(online) {
 function resetAction() {
   clearTimeout(poseTimer);
   clearTimeout(napTimer);
-  clearTimeout(state.idleTimer);
   return ++actionEpoch;
 }
 
@@ -408,14 +372,8 @@ function beginAction(callback) {
 function finishAction() {
   if (activeTransferAnimations.size) return animateDelivery(0, true);
   const target = state.peerOnline ? 'idle' : 'nap';
-  if (state.pose === 'sit') {
-    transitionPose('sit-rise', () => {
-      poseTimer = setTimeout(() => {
-        if (state.pose === 'sit-rise') transitionPose(target);
-      }, catAnimator?.durationFor('sit-rise') || 700);
-    });
-  } else transitionPose(target);
-  if (state.connected) { scheduleNap(); scheduleIdleAction(); }
+  transitionPose(target);
+  if (state.connected) scheduleNap();
 }
 
 function animateDelivery(progress = 1, hold = false) {
@@ -446,7 +404,7 @@ function animateRemoteAction(kind) {
   });
 }
 
-function startMotion(kind, automatic = false) {
+function startMotion(kind) {
   if (panelMode) return;
   beginAction(async epoch => {
     const start = kind === 'walk' ? desktop?.startWalk : desktop?.startJump;
@@ -455,28 +413,41 @@ function startMotion(kind, automatic = false) {
     try { started = await start?.(); } catch {}
     if (epoch !== actionEpoch) return;
     motionPendingKind = null;
-    if (!started) state.edgeAutoOuting ? finishPeekOuting() : animateRemoteAction(kind);
+    if (!started) animateRemoteAction(kind);
   });
-  automaticMotion = automatic;
 }
 
 function animateLocalAction(kind) {
   if (kind === 'walk' || kind === 'jump') return startMotion(kind);
-  animateRemoteAction({ wiggle: 'wave', care: 'happy' }[kind] || kind);
+  animateRemoteAction(kind);
 }
 
 async function triggerAction(kind) {
-  // The remote cat is the source of truth while connected. When the peer is
-  // away, keep the interaction responsive locally without creating a server
-  // event that cannot be delivered.
+  // Offline actions are local history only; they are never queued for delivery.
   unpeek(true);
   if (!state.connected || !state.peerOnline) {
     animateLocalAction(kind);
-    toast(state.connected ? '对方当前不在线' : '还没有连接房间');
+    recordUnsentAction(kind);
     return null;
   }
-  if (kind === 'care') return sendEvent('message', '今天也要好好吃饭呀');
-  return sendEvent(kind);
+  const epoch = connectionEpoch;
+  const clientId = crypto.randomUUID();
+  const sent = await sendEvent(kind, '', { clientId });
+  if (epoch !== connectionEpoch) return null;
+  if (!sent) { animateLocalAction(kind); recordUnsentAction(kind, clientId); }
+  return sent;
+}
+
+function unsentActions() {
+  const saved = JSON.parse(localStorage.getItem(LOCAL_ACTIONS_KEY) || 'null');
+  return saved?.url === state.url ? saved.events : [];
+}
+
+function recordUnsentAction(kind, clientId = crypto.randomUUID()) {
+  const event = { id: clientId, clientId, kind, senderId, senderName: state.name,
+    createdAt: new Date().toISOString(), unsent: true };
+  localStorage.setItem(LOCAL_ACTIONS_KEY, JSON.stringify({ url: state.url, events: [...unsentActions(), event].slice(-300) }));
+  onEvent(event, { replay: true });
 }
 
 function setMode(mode) {
@@ -624,13 +595,9 @@ function catInteractionOpen() {
 function updateIdleForInteraction() {
   if (panelMode) return;
   if (catInteractionOpen()) {
-    clearTimeout(state.idleTimer);
     clearTimeout(peekTimer);
-    clearTimeout(peekOutingTimer);
-    if (state.peeked || state.edgeAutoOuting) unpeek(true);
-    if (automaticMotion) beginAction(finishAction);
+    if (state.peeked) unpeek(true);
   } else {
-    scheduleIdleAction();
     schedulePeek();
   }
 }
@@ -652,6 +619,7 @@ function setQuickComposer(open) {
 
 function clearConversation() {
   clearSpeech();
+  if (!panelMode) localStorage.removeItem(LOCAL_ACTIONS_KEY);
   $('events').replaceChildren();
   seenEvents.clear(); transferStates.clear(); transferRows.clear(); activeTransferAnimations.clear();
   $('quickMessageInput').value = '';
@@ -723,11 +691,9 @@ function onMotionState(kind, moving) {
       speak(kind === 'walk' ? '出门散步啦' : '跳起来啦', 'alert');
     });
   } else if (!state[other]) {
-    automaticMotion = false;
     $('mainMascot').classList.remove('walk-left');
     finishAction();
-    if (state.edgeAutoOuting) setTimeout(finishPeekOuting, 1800);
-    else schedulePeek();
+    schedulePeek();
   }
 }
 
@@ -856,7 +822,7 @@ function showTransfer(item) {
       if (item.phase === 'saved' && item.direction === 'receive' && item.fileId) rememberSavedFile(item.fileId);
       if (wasActive && activeTransferAnimations.size === 0) {
         if (item.phase === 'saved') animateReceive();
-        else { ++actionEpoch; transitionPose(state.peerOnline ? 'idle' : 'nap'); scheduleNap(); scheduleIdleAction(); }
+        else { ++actionEpoch; transitionPose(state.peerOnline ? 'idle' : 'nap'); scheduleNap(); }
       }
     }
   }
@@ -941,12 +907,29 @@ function receiveFile(event) {
 
 function renderEvent(event) {
   const wrapper = document.createElement('div');
+  wrapper.dataset.eventId = event.id;
   wrapper.className = `event ${event.senderId === senderId ? 'mine' : ''} ${event.kind}`;
   const meta = document.createElement('div');
   meta.className = 'event-meta';
-  meta.textContent = `${event.senderId === senderId ? '我' : event.senderName} · ${formatTime(event.createdAt)}`;
-  wrapper.appendChild(meta);
-  if (event.kind === 'file') {
+  meta.textContent = `${event.senderId === senderId ? '我' : event.senderName} · ${formatTime(event.createdAt)}${event.unsent ? ' · 未发送' : ''}`;
+  if (event.unsent) wrapper.classList.add('unsent');
+  const actionText = ACTION_TEXT[event.kind];
+  if (actionText) {
+    wrapper.classList.add('action-event');
+    const marker = document.createElement('div');
+    marker.className = 'action-marker';
+    const icon = document.createElement('img');
+    const icons = { wave: 'hand', pet: 'hand', walk: 'footprints', fish: 'fish', sleep: 'moon', stretch: 'sun', groom: 'cat', hug: 'heart', kiss: 'heart', purr: 'heart' };
+    icon.src = `./icons/${icons[event.kind] || 'sparkles'}.svg`;
+    icon.alt = '';
+    const caption = document.createElement('span');
+    caption.className = 'action-caption';
+    caption.textContent = `${event.senderId === senderId ? '我' : event.senderName}${actionText}`;
+    marker.append(icon, caption);
+    meta.textContent = `${formatTime(event.createdAt)}${event.unsent ? ' · 未发送' : ''}`;
+    wrapper.append(marker, meta);
+  } else if (event.kind === 'file') {
+    wrapper.appendChild(meta);
     const transferId = event.transferId;
     if (panelMode) {
       const earlier = transferRows.get(transferId);
@@ -982,27 +965,25 @@ function renderEvent(event) {
       showTransfer(progress);
     }
   } else {
+    wrapper.appendChild(meta);
     const body = document.createElement('div');
     body.className = 'event-body';
-    const labels = { wave: '👋 向你招了招手', walk: '🐾 让你的小猫散步', jump: '✨ 让你的小猫乱蹦', pet: '🤍 摸摸小猫', fish: '🐟 投喂小鱼干', sit: '🪑 让小猫坐下', sleep: '💤 让小猫睡觉', stretch: '☀ 让小猫伸懒腰', hug: '🫂 给你一个抱抱', kiss: '💋 亲亲你', groom: '🧶 给你梳梳毛', purr: '💗 在你身边呼噜' };
-    body.textContent = labels[event.kind] || event.text;
-    if (event.kind === 'message') {
-      body.classList.add('message-body');
-      const row = document.createElement('div');
-      row.className = 'message-row';
-      const copyButton = document.createElement('button');
-      copyButton.className = 'message-copy';
-      copyButton.type = 'button';
-      copyButton.title = '复制消息';
-      copyButton.setAttribute('aria-label', '复制消息');
-      const copyIcon = document.createElement('img');
-      copyIcon.src = './icons/copy.svg';
-      copyIcon.alt = '';
-      copyButton.appendChild(copyIcon);
-      copyButton.addEventListener('click', () => copySpeechText(event.text));
-      row.append(body, copyButton);
-      wrapper.appendChild(row);
-    } else wrapper.appendChild(body);
+    body.textContent = event.text;
+    body.classList.add('message-body');
+    const row = document.createElement('div');
+    row.className = 'message-row';
+    const copyButton = document.createElement('button');
+    copyButton.className = 'message-copy';
+    copyButton.type = 'button';
+    copyButton.title = '复制消息';
+    copyButton.setAttribute('aria-label', '复制消息');
+    const copyIcon = document.createElement('img');
+    copyIcon.src = './icons/copy.svg';
+    copyIcon.alt = '';
+    copyButton.appendChild(copyIcon);
+    copyButton.addEventListener('click', () => copySpeechText(event.text));
+    row.append(body, copyButton);
+    wrapper.appendChild(row);
   }
   $('events').appendChild(wrapper);
   while ($('events').children.length > 300) {
@@ -1013,25 +994,39 @@ function renderEvent(event) {
   $('events').scrollTop = $('events').scrollHeight;
 }
 
-function onEvent(event) {
+function onEvent(event, { replay = false } = {}) {
   if (!event || typeof event.id !== 'string') return;
+  let locallyAnimated = false;
+  if (!event.unsent && event.senderId === senderId && event.clientId) {
+    if (pendingEvents.has(event.clientId)) pendingEvents.set(event.clientId, event);
+    const local = unsentActions();
+    locallyAnimated = local.some(item => item.clientId === event.clientId);
+    if (locallyAnimated) {
+      if (!panelMode) localStorage.setItem(LOCAL_ACTIONS_KEY, JSON.stringify({
+        url: state.url, events: local.filter(item => item.clientId !== event.clientId)
+      }));
+      for (const row of [...$('events').children]) if (row.dataset.eventId === event.clientId) row.remove();
+    }
+  }
   if (seenEvents.has(event.id)) return;
   seenEvents.add(event.id);
   while (seenEvents.size > 2000) seenEvents.delete(seenEvents.values().next().value);
-  if (event.senderId !== senderId && !panelMode) unpeek(true);
+  if (!replay && event.senderId !== senderId && !panelMode) unpeek(true);
   $('events').querySelector('.empty-state')?.remove();
   renderEvent(event);
   // The mascot window owns animations and notifications. A history panel only
   // mirrors the live event stream, otherwise opening it would duplicate effects.
-  if (panelMode) return;
+  if (panelMode || replay && ACTION_TEXT[event.kind]) return;
   if (event.kind === 'file') receiveFile(event);
-  const actionText = { pet: '摸摸你啦', fish: '给你投喂小鱼干', walk: '让你散步啦', sit: '让你坐下啦', sleep: '让你睡觉啦', stretch: '让你伸个懒腰', jump: '让你乱蹦啦', hug: '给你一个抱抱', kiss: '亲亲你', groom: '给你梳梳毛', purr: '在你身边呼噜' };
-  if (event.kind === 'wave' || actionText[event.kind]) animateLocalAction(event.kind);
+  const actionText = ACTION_TEXT[event.kind];
+  if (actionText && !locallyAnimated) animateLocalAction(event.kind);
   if (event.senderId !== senderId) {
-    const message = event.kind === 'file' ? `收到文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 来打招呼啦` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : event.text;
-    speak(message, event.kind === 'message' ? 'message' : actionText[event.kind] ? 'alert' : 'normal');
+    const message = event.kind === 'file' ? `收到文件：${event.fileName}`
+      : actionText ? `${event.senderName}${actionText}` : event.text;
+    speak(message, event.kind === 'message' ? 'message' : actionText ? 'alert' : 'normal', event.kind === 'message');
     if (event.kind === 'message') animateReceive();
-    if (desktop && state.notifications) desktop.notify(state.profile.petName || DEFAULT_PET_NAME, event.kind === 'file' ? `${event.senderName} 发来文件：${event.fileName}` : event.kind === 'wave' ? `${event.senderName} 向你招手` : actionText[event.kind] ? `${event.senderName} ${actionText[event.kind]}` : `${event.senderName}：${event.text}`);
+    if (desktop && state.notifications) desktop.notify(state.profile.petName || DEFAULT_PET_NAME,
+      event.kind === 'message' ? `${event.senderName}：${event.text}` : message);
   }
   if (event.kind === 'message' && event.senderId === senderId) animateDelivery(1);
 }
@@ -1051,13 +1046,14 @@ function openSocket() {
     reconnectAttempt = 0;
     recoveryBlocked = false;
     state.roomConnection = 'online';
+    if (!panelMode) desktop?.logDiagnostic?.('connection', { state: 'online', mode: state.mode });
     updateConnectionStatus();
     try {
       const response = await request('/events');
       const events = await response.json();
       if (!state.connected || epoch !== connectionEpoch || state.socket !== socket) return;
       for (const event of events) {
-        onEvent(event);
+        onEvent(event, { replay: true });
         if (event.kind === 'file') receiveFile(event);
       }
       await loadTransferSnapshot();
@@ -1078,12 +1074,13 @@ function openSocket() {
       clearConversation();
     }
   };
-  socket.onclose = () => {
+  socket.onclose = event => {
     if (!state.connected || state.socket !== socket) return;
     clearTimeout(socketConnectTimer);
     state.socket = null;
     state.token = '';
     state.roomConnection = 'reconnecting';
+    if (!panelMode) desktop?.logDiagnostic?.('connection', { state: 'offline', mode: state.mode, code: event?.code });
     setPeerOnline(false);
     scheduleSessionRetry();
   };
@@ -1118,6 +1115,7 @@ function scheduleSessionRetry(delay) {
   state.reconnectTimer = setTimeout(async () => {
     if (!state.connected || epoch !== connectionEpoch) return;
     retryInFlightEpoch = epoch;
+    if (!panelMode) desktop?.logDiagnostic?.('connection', { state: 'connecting', mode: state.mode, attempt: reconnectAttempt });
     let retry = false;
     try {
       await ensureHostStarted(epoch);
@@ -1134,6 +1132,7 @@ function scheduleSessionRetry(delay) {
       openSocket();
     } catch (error) {
       if (state.connected && epoch === connectionEpoch) {
+        if (!panelMode) logFailure('connect', error);
         retry = window.ConnectionPolicy.shouldRetry(error);
         recoveryBlocked = !retry;
         if (!retry) toast(error.message);
@@ -1185,7 +1184,10 @@ async function connect(url, name, mode, { restoreHost = false } = {}) {
     await ensureHostStarted(epoch);
     if (epoch !== connectionEpoch) return;
     session = await openSession(state.url, state.name, mode, freshConnection);
-  } catch (error) { if (!window.ConnectionPolicy.shouldRetry(error)) throw error; }
+  } catch (error) {
+    if (!panelMode) logFailure('connect', error);
+    if (!window.ConnectionPolicy.shouldRetry(error)) throw error;
+  }
   if (epoch !== connectionEpoch) return;
   state.token = session?.token || '';
   applyRoomIdentity(session);
@@ -1206,7 +1208,7 @@ async function connect(url, name, mode, { restoreHost = false } = {}) {
   $('events').replaceChildren();
   transferRows.clear();
   seenEvents.clear();
-  const visibleEvents = events;
+  const visibleEvents = [...events, ...unsentActions()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-300);
   if (visibleEvents.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'empty-state';
@@ -1247,17 +1249,14 @@ async function disconnect() {
   if (state.token) request('/leave', { method: 'POST', signal: AbortSignal.timeout(2000) }).catch(() => {});
   cancelRoomTransfers(roomUrl);
   state.roomConnection = 'closed';
+  if (!panelMode) desktop?.logDiagnostic?.('connection', { state: 'disconnected', mode: state.mode });
   if (!panelMode && state.walking) desktop?.stopWalk();
   if (!panelMode && state.jumping) desktop?.stopJump();
   clearTimeout(poseTimer);
   clearTimeout(napTimer);
-  clearInterval(blinkTimer);
-  clearTimeout(state.idleTimer);
   clearTimeout(peekTimer);
-  clearTimeout(peekOutingTimer);
   clearTimeout(edgeHoldTimer);
   state.edgeHold = false;
-  state.edgeAutoOuting = false;
   state.peeked = false;
   $('window').classList.remove('peeked');
   setQuickComposer(false);
@@ -1286,18 +1285,24 @@ async function disconnect() {
 }
 
 async function sendEvent(kind, text = '', { clientId = crypto.randomUUID() } = {}) {
+  const epoch = connectionEpoch;
+  pendingEvents.set(clientId, null);
   try {
     const response = await request('/events', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind, text, clientId })
     });
-    if (kind === 'wave') {
-      speak('招手送出去了');
-    } else if (kind === 'walk') speak('已经让对方散步啦', 'alert');
-    else if (kind === 'jump') speak('已经让对方乱蹦啦', 'alert');
-    else if (['pet', 'fish', 'sit', 'sleep', 'stretch', 'hug', 'kiss', 'groom', 'purr'].includes(kind)) speak('动作送到对方那里啦', 'alert');
-    return await response.json();
-  } catch (error) { toast(error.message); return null; }
+    const event = await response.json();
+    if (epoch !== connectionEpoch) return null;
+    onEvent(event);
+    return event;
+  } catch (error) {
+    if (epoch !== connectionEpoch) return null;
+    if (pendingEvents.get(clientId)) return pendingEvents.get(clientId);
+    logFailure(kind === 'message' ? 'send-message' : 'send-action', error);
+    if (kind === 'message') toast(error.message);
+    return null;
+  } finally { pendingEvents.delete(clientId); }
 }
 
 async function sendMessage(text, clientId) {
@@ -1391,6 +1396,7 @@ async function init() {
   const recover = force => { recoverConnection(force); refreshHostAddresses(); };
   window.addEventListener('online', () => recover(true));
   window.addEventListener('focus', () => recover());
+  window.addEventListener('resize', drawSpeechShell);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) recover(); });
   desktop?.onResume?.(() => recover(true));
   if (desktop?.onTransferProgress) {
@@ -1411,7 +1417,8 @@ async function init() {
   $('speech').addEventListener('click', openSpeechHistory);
   $('speech').addEventListener('dblclick', copySpeechMessage);
   $('speech').addEventListener('wheel', event => {
-    if ($('speech').scrollHeight <= $('speech').clientHeight) return;
+    const content = $('speechContent');
+    if (content.scrollHeight <= content.clientHeight) return;
     event.preventDefault();
     scrollSpeech(event.deltaY);
   }, { passive: false });
@@ -1425,25 +1432,21 @@ async function init() {
   $('joinAddress').addEventListener('input', () => $('scanResults').querySelectorAll('.scan-choice').forEach(item => item.classList.remove('selected')));
   $('closeButton').addEventListener('click', () => panelMode ? desktop.closePanel() : desktop.close());
   $('settingsButton').addEventListener('click', () => desktop.openPanel('settings'));
-  $('idleActionsToggle').checked = state.idleActions;
   $('edgeHideToggle').checked = state.edgeHideEnabled;
   $('desktopNotificationsToggle').checked = state.notifications;
-  $('idleActionsToggle').addEventListener('change', event => {
-    state.idleActions = event.target.checked;
-    localStorage.setItem('dongdong-idle-actions', JSON.stringify(state.idleActions));
-    if (state.idleActions) scheduleIdleAction(); else clearTimeout(state.idleTimer);
-  });
+  $('openLogsButton').addEventListener('click', () => desktop?.openLogs?.());
   $('edgeHideToggle').addEventListener('change', event => {
     setEdgeHide(event.target.checked);
     localStorage.setItem('dongdong-edge-hide', JSON.stringify(state.edgeHideEnabled));
   });
   window.addEventListener('storage', event => {
-    if (event.key === 'dongdong-edge-hide') setEdgeHide(event.newValue === 'true');
-    if (event.key === 'dongdong-idle-actions') {
-      state.idleActions = event.newValue === 'true';
-      $('idleActionsToggle').checked = state.idleActions;
-      if (state.idleActions) scheduleIdleAction(); else clearTimeout(state.idleTimer);
+    if (event.key === LOCAL_ACTIONS_KEY) {
+      const local = unsentActions();
+      for (const row of [...$('events').children]) if (row.classList.contains('unsent')
+        && !local.some(item => item.id === row.dataset.eventId)) row.remove();
+      for (const item of local) onEvent(item, { replay: true });
     }
+    if (event.key === 'dongdong-edge-hide') setEdgeHide(event.newValue === 'true');
     if (event.key === 'dongdong-notifications') {
       state.notifications = event.newValue === 'true';
       $('desktopNotificationsToggle').checked = state.notifications;
@@ -1545,7 +1548,6 @@ async function init() {
     syncMousePassThrough();
   });
   $('waveButton').addEventListener('click', () => triggerAction('wave'));
-  $('careButton').addEventListener('click', () => triggerAction('care'));
   $('actionMenuButton').addEventListener('click', () => setActionTray($('actionTray').hidden));
   $('actionTrayClose').addEventListener('click', () => setActionTray(false));
   document.querySelectorAll('.action-choice').forEach(button => button.addEventListener('click', () => {
@@ -1557,6 +1559,7 @@ async function init() {
   if (!panelMode && desktop?.onWalkDirection) desktop.onWalkDirection(direction => {
     $('mainMascot').classList.toggle('walk-left', direction < 0);
   });
+  if (!panelMode) desktop?.onWalkPace?.(pace => catAnimator?.setWalkPace(pace));
   if (!panelMode && desktop?.onJumpState) desktop.onJumpState(jumping => onMotionState('jump', jumping));
   if (!panelMode && desktop?.onPeekState) desktop.onPeekState(peeked => {
     state.peeked = Boolean(peeked);
@@ -1654,4 +1657,7 @@ async function init() {
   }
 }
 
-init().catch(error => { $('setupFeedback').textContent = error.message; });
+init().catch(error => {
+  desktop?.logDiagnostic?.('renderer-error', { kind: 'error', name: error.name, source: 'app.js' });
+  $('setupFeedback').textContent = error.message;
+});

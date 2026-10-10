@@ -54,16 +54,19 @@
           <h2 class="settings-title" id="preferencesTitle">应用偏好</h2>
           <p class="settings-intro">调整小橘的启动方式和陪伴节奏。</p>
           <label class="setting-row" for="autoLaunchSetup"><span><strong>开机自启动</strong><small>登录系统后自动打开小橘</small></span><input type="checkbox" id="autoLaunchSetup"></label>
-          <label class="setting-row" for="idleActionsToggle"><span><strong>允许小猫自己玩</strong><small>对方在线时偶尔眨眼、打盹或撒娇</small></span><input type="checkbox" id="idleActionsToggle" checked></label>
-          <label class="setting-row" for="edgeHideToggle"><span><strong>长时间无操作时靠边</strong><small>偶尔出来活动，互动后会留下片刻</small></span><input type="checkbox" id="edgeHideToggle"></label>
+          <label class="setting-row" for="edgeHideToggle"><span><strong>长时间无操作时靠边</strong><small>安静靠在侧边，互动后会留下片刻</small></span><input type="checkbox" id="edgeHideToggle"></label>
           <label class="setting-row" for="desktopNotificationsToggle"><span><strong>桌面通知</strong><small>收到消息或文件时提醒我</small></span><input type="checkbox" id="desktopNotificationsToggle" checked></label>
+          <button class="text-button log-button" id="openLogsButton" type="button">打开运行日志</button>
         </section>
       </div>
     </section>
 
     <section class="companion" id="companion" hidden>
       <div class="companion-main">
-        <div class="speech" id="speech" aria-live="polite"></div>
+        <div class="speech" id="speech" aria-live="polite">
+          <svg class="speech-shell" id="speechShell" aria-hidden="true"><path id="speechOutline"></path></svg>
+          <span class="speech-content" id="speechContent"></span>
+        </div>
         <div class="couple-badge" id="coupleBadge" hidden><span id="petNameLabel">小橘</span></div>
         <button class="mascot-button" id="mascotButton" title="摸摸小橘" aria-label="摸摸小橘"><span class="mascot" id="mainMascot"></span><span class="voice-bubble" id="voiceBubble" aria-live="polite" hidden></span></button>
         <span class="floor-shadow"></span>
@@ -75,7 +78,6 @@
       <div class="compact-actions" id="compactActions">
         <button class="action-button wave-button" id="waveButton" title="向对方招手"><img src="./icons/hand.svg" alt=""><span>招手</span></button>
         <button class="action-button" id="actionMenuButton" title="更多动作"><img src="./icons/sparkles.svg" alt=""><span>动作</span></button>
-        <button class="action-button" id="careButton" title="给对方一句关心"><img src="./icons/heart.svg" alt=""><span>关心</span></button>
         <button class="action-button" id="openButton" title="写消息"><img src="./icons/message-circle.svg" alt=""><span>消息</span></button>
         <button class="action-button" id="quickFileButton" title="发送文件"><img src="./icons/paperclip.svg" alt=""><span>文件</span></button>
       </div>
@@ -85,10 +87,8 @@
         <button class="quick-close-button" id="quickMessageClose" type="button" title="收起" aria-label="收起消息输入"><img src="./icons/x.svg" alt=""></button>
       </form>
       <div class="action-tray" id="actionTray" hidden>
-        <button class="action-choice" data-action="pet"><span>🤍</span>摸摸</button>
         <button class="action-choice" data-action="fish"><span>🐟</span>小鱼干</button>
         <button class="action-choice" data-action="walk"><img src="./icons/footprints.svg" alt="">散步</button>
-        <button class="action-choice" data-action="sit"><span>🪑</span>坐下</button>
         <button class="action-choice" data-action="sleep"><span>💤</span>睡觉</button>
         <button class="action-choice" data-action="stretch"><span>☀</span>伸懒腰</button>
         <button class="action-choice" data-action="jump"><img src="./icons/sparkles.svg" alt="">蹦跶</button>
