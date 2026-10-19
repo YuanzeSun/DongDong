@@ -275,10 +275,8 @@ else {
       if (walkTimer) stopWalk();
       if (jumpTimer) stopJump();
       const bounds = window.getBounds(); const area = screen.getDisplayMatching(bounds).workArea;
-      window.setPosition(Math.round(bounds.x + deltaX), Math.round(bounds.y + deltaY), false);
-      const next = window.getBounds();
-      const clamped = clampBounds(next, area);
-      if (next.x !== clamped.x || next.y !== clamped.y) window.setPosition(clamped.x, clamped.y, false);
+      const next = clampBounds({ ...bounds, x: bounds.x + deltaX, y: bounds.y + deltaY }, area);
+      window.setPosition(next.x, next.y, false);
     });
     ipcMain.handle('start-walk', (event, motionId) => ownsCat(event) && startWalk(motionId));
     ipcMain.handle('stop-walk', event => { if (ownsCat(event)) stopWalk(); });
