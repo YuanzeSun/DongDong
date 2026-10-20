@@ -739,8 +739,6 @@ async function request(route, options = {}) {
 
 function applyProfile(profile = {}) {
   state.profile = { petName: DEFAULT_PET_NAME, ...profile };
-  $('petNameLabel').textContent = state.profile.petName || DEFAULT_PET_NAME;
-  $('coupleBadge').hidden = !state.connected;
   $('profilePetName').value = state.profile.petName || '';
 }
 
@@ -1547,7 +1545,6 @@ async function init() {
     $('contextMenu').hidden = true;
     syncMousePassThrough();
   });
-  $('waveButton').addEventListener('click', () => triggerAction('wave'));
   $('actionMenuButton').addEventListener('click', () => setActionTray($('actionTray').hidden));
   $('actionTrayClose').addEventListener('click', () => setActionTray(false));
   document.querySelectorAll('.action-choice').forEach(button => button.addEventListener('click', () => {

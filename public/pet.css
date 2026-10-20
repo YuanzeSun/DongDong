@@ -29,7 +29,6 @@
 }
 .window.compact .floor-shadow { bottom: 1px; }
 .window.compact .speech,
-.window.compact .couple-badge,
 .window.compact .compact-actions,
 .window.compact .floor-shadow {
   opacity: 0;
@@ -126,24 +125,19 @@
 .event.action-event.unsent .event-meta { color: #ad6959; }
 .window.compact .speech.speech-message,
 .window.compact.cat-hovered .speech,
-.window.compact.cat-hovered .couple-badge,
 .window.compact.cat-hovered .compact-actions,
 .window.compact.actions-held .compact-actions,
 .window.compact:has(.action-tray:not([hidden])) .compact-actions,
 .window.compact .compact-actions:hover,
 .window.compact:has(.mascot-button:focus-visible) .compact-actions,
 .window.compact.cat-hovered .floor-shadow,
-.window.compact:focus-within .speech,
-.window.compact:focus-within .couple-badge {
+.window.compact:focus-within .speech {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 }
 .window.compact .speech.speech-message {
   transition: opacity .1s ease, visibility 0s;
-}
-.window:has(.speech-message.has-content) .couple-badge {
-  display: none;
 }
 .quick-composer {
   display: flex;
@@ -200,7 +194,6 @@
 }
 .window.peeked .speech,
 .window.peeked .voice-bubble,
-.window.peeked .couple-badge,
 .window.peeked .floor-shadow,
 .window.peeked .compact-actions { display: none; }
 .window.peeked .companion-main { height: 176px; min-height: 176px; }
@@ -269,8 +262,6 @@ body.panel-mode .expanded {
   flex: 1;
   border-top: 0;
 }
-.couple-badge { position:absolute; top:48px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid #dcebe3; border-radius:999px; background:#ffffffd9; color:#4f7565; box-shadow:0 3px 10px #2b4a3614; font-size:10px; z-index:3; white-space:nowrap; }
-.couple-badge span:first-child { color:#c46355; font-weight:800; }
 .shared-profile { margin:16px 0 4px; padding:12px; border:1px solid #dfeae4; border-radius:8px; background:#f8fcfa; }
 .shared-profile h3 { margin:0 0 10px; color:#426a5a; font-size:12px; }
 .shared-profile label { display:grid; gap:5px; margin-top:8px; color:#718b7f; font-size:10px; font-weight:700; }
