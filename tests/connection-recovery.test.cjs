@@ -15,7 +15,7 @@ function renderer(panelKind = '') {
   const sockets = [];
   const listeners = new Map();
   let nextTimer = 1;
-  const environment = { addresses: [], addressReads: 0, starts: 0, stops: 0, panelsClosed: 0 };
+  const environment = { addresses: [], addressReads: 0, starts: 0, stops: 0, panelsClosed: 0, roomStates: [] };
   const element = () => {
     const queries = new Map();
     return { hidden: false, value: '', dataset: {}, children: [], listeners: new Map(), style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} },
@@ -33,6 +33,7 @@ function renderer(panelKind = '') {
   const context = vm.createContext({
     window: { ConnectionPolicy, addEventListener: (type, listener) => listeners.set(type, listener), petDesktop: {
       panelKind,
+      setRoomConnected: connected => environment.roomStates.push(connected),
       addresses: async () => { environment.addressReads++; return environment.addresses; },
       startHost: async address => { environment.starts++; return { url: `http://${address}:4827` }; },
       stopHost: async () => { environment.stops++; },
@@ -72,6 +73,7 @@ test('saved host waits in offline mode for Tailscale then restores its room', as
   assert.equal(page.elements.get('companion').hidden, false);
   assert.equal(page.elements.get('setup').hidden, true);
   assert.equal(page.environment.starts, 0);
+  assert.ok(page.environment.roomStates.every(connected => !connected), 'an offline saved session must not enable messages');
   page.environment.addresses = [{ address: '100.80.0.1' }];
   await page.retry();
   assert.equal(page.environment.starts, 1);
@@ -80,6 +82,9 @@ test('saved host waits in offline mode for Tailscale then restores its room', as
   await page.sockets[0].onopen();
   assert.equal(page.run('state.roomConnection'), 'online');
   assert.equal(page.run('state.token'), 'fresh-token');
+  assert.equal(page.environment.roomStates.at(-1), true);
+  page.sockets[0].onclose({ code: 1006 });
+  assert.equal(page.environment.roomStates.at(-1), false, 'a lost room session disables messages');
 });
 
 test('leaving a room wins over a session request already in flight', async () => {
@@ -97,6 +102,8 @@ test('leaving a room wins over a session request already in flight', async () =>
   assert.equal(page.sockets.length, 0);
   assert.equal(page.elements.get('setup').hidden, false);
   assert.equal(page.timers.size, 0);
+  assert.equal(page.environment.roomStates.at(-1), false);
+  assert.equal(page.environment.roomStates.includes(true), false, 'a stale session response must not enable messages');
 });
 
 test('a brief outage updates presence immediately but cancels sleep when the peer returns', () => {
@@ -119,6 +126,7 @@ test('an auxiliary settings window never starts the host during session restorat
   assert.equal(page.run('state.hostStarted'), false);
   assert.equal(page.sockets.length, 1);
   assert.equal(page.storage.has(page.run('SESSION_KEY')), false);
+  assert.deepEqual(page.environment.roomStates, [], 'only the mascot publishes native room state');
 });
 
 for (const panelKind of ['settings', 'chat']) {

@@ -1,6 +1,6 @@
 {
   "name": "hello-pet",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "private": true,
   "author": "Dongdong",
   "description": "A little desktop companion for two computers on Tailscale",
@@ -34,12 +34,17 @@
       "public/**/*",
       "server/**/*",
       "assets/icon.png",
+      "assets/trayTemplate*.png",
+      "assets/tray.ico",
       "package.json"
     ],
     "directories": {
       "output": "release"
     },
     "mac": {
+      "extendInfo": {
+        "LSUIElement": true
+      },
       "category": "public.app-category.social-networking",
       "icon": "assets/icon.icns",
       "target": [

@@ -1029,6 +1029,10 @@ function onEvent(event, { replay = false } = {}) {
   if (event.kind === 'message' && event.senderId === senderId) animateDelivery(1);
 }
 
+function reportRoomState(connected = state.connected && Boolean(state.token)) {
+  if (!panelMode) desktop?.setRoomConnected?.(connected);
+}
+
 function openSocket() {
   if (!state.connected || !state.token) return;
   clearTimeout(socketConnectTimer);
@@ -1077,6 +1081,7 @@ function openSocket() {
     clearTimeout(socketConnectTimer);
     state.socket = null;
     state.token = '';
+    reportRoomState();
     state.roomConnection = 'reconnecting';
     if (!panelMode) desktop?.logDiagnostic?.('connection', { state: 'offline', mode: state.mode, code: event?.code });
     setPeerOnline(false);
@@ -1121,6 +1126,7 @@ function scheduleSessionRetry(delay) {
       const session = await openSession(state.url, state.name, state.mode, freshConnection);
       if (!state.connected || epoch !== connectionEpoch) return;
       state.token = session.token;
+      reportRoomState();
       applyRoomIdentity(session);
       if (!panelMode) desktop?.setTransferSession?.(state.url, state.token);
       state.roomConnection = 'connecting';
@@ -1150,6 +1156,7 @@ function recoverConnection(force = false) {
   state.socket = null;
   socket?.close();
   state.token = '';
+  reportRoomState();
   state.roomConnection = 'reconnecting';
   setPeerOnline(false);
   scheduleSessionRetry(0);
@@ -1157,6 +1164,7 @@ function recoverConnection(force = false) {
 
 async function connect(url, name, mode, { restoreHost = false } = {}) {
   const normalized = normalizeAddress(url);
+  reportRoomState(false);
   const oldUrl = state.url || JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')?.url;
   const epoch = ++connectionEpoch;
   clearTimeout(state.reconnectTimer);
@@ -1198,6 +1206,7 @@ async function connect(url, name, mode, { restoreHost = false } = {}) {
   }
   if (epoch !== connectionEpoch) return;
   state.connected = true;
+  reportRoomState();
   state.roomConnection = session ? 'connecting' : 'reconnecting';
   $('setup').hidden = true;
   $('companion').hidden = false;
@@ -1240,6 +1249,7 @@ async function connect(url, name, mode, { restoreHost = false } = {}) {
 async function disconnect() {
   ++connectionEpoch;
   state.connected = false;
+  reportRoomState();
   clearSpeech();
   const roomUrl = state.url;
   // Capture credentials before clearing them. Leaving an unavailable room must
@@ -1532,6 +1542,11 @@ async function init() {
     $('contextMenu').hidden = true;
     syncMousePassThrough();
     desktop.openPanel('settings');
+  });
+  $('contextQuit').addEventListener('click', () => {
+    $('contextMenu').hidden = true;
+    syncMousePassThrough();
+    desktop?.quit();
   });
   $('mascotButton').addEventListener('mouseenter', unpeek);
   $('mascotButton').addEventListener('focus', unpeek);

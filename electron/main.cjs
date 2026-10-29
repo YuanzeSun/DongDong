@@ -47,6 +47,7 @@ else {
   // The mascot window is intentionally independent from these regular utility windows. Closing
   // a panel must never hide the mascot, and closing the mascot must not tear down a panel.
   const panelWindows = new Map();
+  let roomConnected = false;
   const ownsCat = event => window && !window.isDestroyed() && event.sender === window.webContents;
   const ownsWindow = event => event.senderFrame === event.sender.mainFrame
     && (ownsCat(event) || [...panelWindows.values()].some(panel => !panel.isDestroyed() && event.sender === panel.webContents));
@@ -178,10 +179,13 @@ else {
       saveAutoLaunchPreference(true);
     } catch (error) { console.warn('Could not enable auto-launch:', error); }
   }
-  function showWindow() { if (!window || window.isDestroyed()) return; window.show(); window.focus(); window.webContents.send('menu-action', 'show'); }
+  function showWindow() { if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); window.webContents.send('menu-action', 'show'); }
   function quitApp() { isQuitting = true; stopWalk(); stopJump(); for (const panel of panelWindows.values()) if (!panel.isDestroyed()) panel.close(); panelWindows.clear(); if (room) room.close().catch(() => {}); app.quit(); }
   function observeRenderer(view) {
-    view.webContents.on('render-process-gone', (_event, details) => diagnostics?.write('renderer-crash', details));
+    view.webContents.on('render-process-gone', (_event, details) => {
+      if (view === window) setRoomConnected(false);
+      diagnostics?.write('renderer-crash', details);
+    });
     view.webContents.on('unresponsive', () => diagnostics?.write('renderer-unresponsive'));
     view.webContents.on('responsive', () => diagnostics?.write('renderer-responsive'));
     view.webContents.on('did-fail-load', (_event, code, _description, _validatedUrl, isMainFrame) => {
@@ -195,6 +199,7 @@ else {
   }
   function openPanel(value) {
     const kind = panelKind(value);
+    if (kind === 'chat' && !roomConnected) return false;
     const existing = panelWindows.get(kind);
     if (existing && !existing.isDestroyed()) {
       if (existing.isMinimized()) existing.restore();
@@ -209,6 +214,7 @@ else {
       title: kind === 'chat' ? 'Dongdong · 消息' : 'Dongdong · 设置',
       icon: path.join(__dirname, '..', 'assets', 'icon.png'),
       show: false,
+      skipTaskbar: true,
       autoHideMenuBar: true,
       backgroundColor: '#f8fbf9',
       webPreferences: {
@@ -232,17 +238,44 @@ else {
     panel.close();
     return true;
   }
+  function setRoomConnected(connected) {
+    const next = Boolean(connected);
+    if (roomConnected === next) return;
+    roomConnected = next;
+    updateTrayMenu();
+    if (!next) panelWindows.get('chat')?.close();
+  }
+  function updateTrayMenu() {
+    if (!tray) return;
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: '显示咚咚', click: showWindow },
+      { label: '隐藏咚咚', click: () => window?.hide() },
+      { type: 'separator' },
+      { label: '消息', enabled: roomConnected, click: () => openPanel('chat') },
+      { label: '设置', click: () => openPanel('settings') },
+      { type: 'separator' },
+      { label: '退出', click: quitApp }
+    ]));
+  }
   function createTray() {
-    tray = new Tray(path.join(__dirname, '..', 'assets', 'icon.png')); tray.setToolTip('Dongdong');
-    tray.setContextMenu(Menu.buildFromTemplate([{ label: '显示东东', click: showWindow }, { label: '设置', click: () => openPanel('settings') }, { type: 'separator' }, { label: '退出', click: quitApp }])); tray.on('click', showWindow);
+    const icon = process.platform === 'darwin' ? 'trayTemplate.png' : process.platform === 'win32' ? 'tray.ico' : 'icon.png';
+    tray = new Tray(path.join(__dirname, '..', 'assets', icon));
+    tray.setToolTip('Dongdong');
+    updateTrayMenu();
+    // macOS opens the menu on click; Windows uses left-click to reveal the cat
+    // and right-click to open the context menu.
+    if (process.platform !== 'darwin') tray.on('click', showWindow);
   }
   function createWindow() {
-    window = new BrowserWindow({ width: 420, height: 700, minWidth: 138, minHeight: 176, icon: path.join(__dirname, '..', 'assets', 'icon.png'), frame: false, transparent: true, alwaysOnTop: true, resizable: false, hasShadow: false, skipTaskbar: false, backgroundColor: '#00000000', show: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    window = new BrowserWindow({ width: 420, height: 700, minWidth: 138, minHeight: 176, icon: path.join(__dirname, '..', 'assets', 'icon.png'), frame: false, transparent: true, alwaysOnTop: true, resizable: false, hasShadow: false, skipTaskbar: true, backgroundColor: '#00000000', show: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
     observeRenderer(window);
     window.loadFile(path.join(__dirname, '..', 'public', 'index.html')); window.on('close', event => { if (!isQuitting) { event.preventDefault(); window.hide(); } }); window.on('closed', () => { stopWalk(); stopJump(); window = null; }); window.on('move', clampWindow);
   }
   app.on('second-instance', showWindow);
   app.whenReady().then(() => {
+    // Keep development runs and packaged builds out of the Dock, including
+    // while a settings or chat panel is focused.
+    if (process.platform === 'darwin') app.setActivationPolicy('accessory');
     diagnostics = createDiagnostics({ logsPath: app.getPath('logs') });
     diagnostics.write('app-start', { version: app.getVersion(), platform: process.platform, arch: process.arch });
     initializeAutoLaunch();
@@ -294,6 +327,7 @@ else {
     });
     ipcMain.handle('set-peeked', (event, next) => ownsCat(event) && setPeeked(next));
     ipcMain.handle('open-panel', (_event, kind) => openPanel(kind));
+    ipcMain.handle('set-room-connected', (event, connected) => { if (ownsCat(event)) setRoomConnected(connected); });
     ipcMain.handle('close-panel', event => closePanel(event.sender));
     ipcMain.handle('copy', (_event, value) => clipboard.writeText(String(value).slice(0, 500)));
     ipcMain.handle('transfer-snapshot', () => transferManager.snapshot());
@@ -317,5 +351,7 @@ else {
     createTray(); createWindow();
   });
   powerMonitor.on('resume', () => { for (const view of [window, ...panelWindows.values()]) if (view && !view.isDestroyed()) view.webContents.send('system-resume'); });
-  app.on('activate', showWindow); app.on('before-quit', () => { diagnostics?.write('app-quit', { reason: isQuitting ? 'user' : 'shutdown' }); isQuitting = true; transferManager.close(); stopWalk(); stopJump(); diagnostics?.close(); }); app.on('window-all-closed', event => { if (!isQuitting && process.platform !== 'darwin') event.preventDefault(); });
+  app.on('activate', showWindow); app.on('before-quit', () => { diagnostics?.write('app-quit', { reason: isQuitting ? 'user' : 'shutdown' }); isQuitting = true; transferManager.close(); stopWalk(); stopJump(); diagnostics?.close(); });
+  // Subscribing keeps Electron alive for the tray even without any open windows.
+  app.on('window-all-closed', () => {});
 }

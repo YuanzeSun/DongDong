@@ -29,6 +29,15 @@ async function main() {
     offset += pngs[index].length;
   });
   fs.writeFileSync(path.join(root, 'assets', 'icon.ico'), Buffer.concat([header, ...pngs]));
+  fs.writeFileSync(path.join(root, 'assets', 'tray.ico'), Buffer.concat([header, ...pngs]));
+
+  // Template filenames let macOS tint the monochrome cat for the menu bar.
+  for (const scale of [1, 2]) {
+    await sharp(path.join(root, 'assets', 'tray.svg'))
+      .resize(16 * scale, 16 * scale, { kernel: 'nearest' })
+      .withMetadata({ density: 72 * scale }).png()
+      .toFile(path.join(root, 'assets', `trayTemplate${scale === 2 ? '@2x' : ''}.png`));
+  }
 
   if (process.platform === 'darwin') {
     const iconset = path.join(root, 'assets', 'icon.iconset');

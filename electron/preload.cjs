@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('petDesktop', {
   // while their native close button only closes that panel.
   panelKind,
   openPanel: kind => ipcRenderer.invoke('open-panel', kind),
+  setRoomConnected: connected => ipcRenderer.invoke('set-room-connected', connected),
   closePanel: () => ipcRenderer.invoke('close-panel'),
   addresses: () => ipcRenderer.invoke('addresses'),
   scanPeers: () => ipcRenderer.invoke('scan-peers'),
