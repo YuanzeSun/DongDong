@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/build.yml'), 'utf8');
+const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/build.yml'), 'utf8').replace(/\r\n/g, '\n');
 const signing = workflow.split('      - name: Build macOS arm64 DMG\n')[1].split('      - name: Build Windows installer\n')[0];
 const verification = workflow.split('      - name: Verify macOS app signature\n')[1].split('      - uses:')[0];
 const condition = verification.match(/^        if: (.+)$/m)[1];
