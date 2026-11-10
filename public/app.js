@@ -32,6 +32,7 @@ const state = {
 };
 const seenEvents = new Set();
 const pendingEvents = new Map();
+let historyHasNewEvents = false;
 let poseTimer;
 let napTimer;
 let wakeTimer;
@@ -621,6 +622,8 @@ function clearConversation() {
   clearSpeech();
   if (!panelMode) localStorage.removeItem(LOCAL_ACTIONS_KEY);
   $('events').replaceChildren();
+  historyHasNewEvents = false;
+  $('historyLatest').hidden = true;
   seenEvents.clear(); transferStates.clear(); transferRows.clear(); activeTransferAnimations.clear();
   $('quickMessageInput').value = '';
   $('messageInput').value = '';
@@ -769,6 +772,32 @@ function formatTime(value) {
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
 
+function historyAtLatest() {
+  const events = $('events');
+  return !events.clientHeight || events.scrollHeight - events.scrollTop - events.clientHeight <= 32;
+}
+
+function updateHistoryJump() {
+  const latest = historyAtLatest();
+  if (latest) historyHasNewEvents = false;
+  $('historyLatest').hidden = latest;
+  $('historyLatest').textContent = historyHasNewEvents ? '有新消息 · 回到最新 ↓' : '回到最新 ↓';
+}
+
+function scrollHistoryToLatest() {
+  $('events').scrollTop = $('events').scrollHeight;
+  historyHasNewEvents = false;
+  $('historyLatest').hidden = true;
+}
+
+function finishHistoryUpdate(follow, newEvent = false) {
+  if (follow) scrollHistoryToLatest();
+  else {
+    if (newEvent) historyHasNewEvents = true;
+    updateHistoryJump();
+  }
+}
+
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -790,6 +819,7 @@ function transferLabel(item) {
 
 function showTransfer(item) {
   if (!item?.transferId) return;
+  const followHistory = historyAtLatest();
   item = { ...item, roomUrl: item.roomUrl || state.url };
   if (state.url && item.roomUrl !== state.url) return;
   const previous = transferStates.get(item.transferId);
@@ -861,7 +891,7 @@ function showTransfer(item) {
     button.addEventListener('click', () => transferAction(item, canCancel ? 'cancel' : 'retry'));
     controls.appendChild(button); status.appendChild(controls);
   }
-  $('events').scrollTop = $('events').scrollHeight;
+  finishHistoryUpdate(followHistory);
 }
 
 function rememberSavedFile(fileId) {
@@ -904,6 +934,7 @@ function receiveFile(event) {
 }
 
 function renderEvent(event) {
+  const followHistory = historyAtLatest();
   const wrapper = document.createElement('div');
   wrapper.dataset.eventId = event.id;
   wrapper.className = `event ${event.senderId === senderId ? 'mine' : ''} ${event.kind}`;
@@ -989,7 +1020,7 @@ function renderEvent(event) {
     for (const [id, row] of transferRows) if (row === oldest) transferRows.delete(id);
     oldest.remove();
   }
-  $('events').scrollTop = $('events').scrollHeight;
+  finishHistoryUpdate(followHistory, true);
 }
 
 function onEvent(event, { replay = false } = {}) {
@@ -1401,6 +1432,8 @@ async function copy(value) {
 }
 
 async function init() {
+  $('events').addEventListener('scroll', updateHistoryJump, { passive: true });
+  $('historyLatest').addEventListener('click', scrollHistoryToLatest);
   const recover = force => { recoverConnection(force); refreshHostAddresses(); };
   window.addEventListener('online', () => recover(true));
   window.addEventListener('focus', () => recover());
