@@ -672,3 +672,60 @@ test('finishing one concurrent transfer keeps the cat holding until the last com
   assert.equal(page.run('activeTransferAnimations.size'), 0);
   assert.notEqual(page.animator.action, 'delivery-hold');
 });
+
+test('history follows new messages when the reader is already at the latest', () => {
+  const page = renderer('chat');
+  const events = page.elements.get('events');
+  events.clientHeight = 300;
+  events.scrollTop = 700;
+  Object.defineProperty(events, 'scrollHeight', { get: () => 1000 + events.children.length * 60 });
+  page.run("renderEvent({id:'new', kind:'message', text:'晚点见', senderId:'peer', senderName:'她', createdAt:new Date().toISOString()})");
+  assert.equal(events.scrollTop, 1060);
+  assert.equal(page.elements.get('historyLatest').hidden, true);
+});
+
+test('new messages preserve the reading position and offer a jump to the latest', () => {
+  const page = renderer('chat');
+  const events = page.elements.get('events');
+  Object.assign(events, { clientHeight: 300, scrollHeight: 1000, scrollTop: 120 });
+  page.run("renderEvent({id:'new', kind:'message', text:'晚点见', senderId:'peer', senderName:'她', createdAt:new Date().toISOString()})");
+  assert.equal(events.scrollTop, 120);
+  assert.equal(page.elements.get('historyLatest').hidden, false);
+  assert.match(page.elements.get('historyLatest').textContent, /有新消息/);
+  page.run('scrollHistoryToLatest()');
+  assert.equal(events.scrollTop, 1000);
+  assert.equal(page.elements.get('historyLatest').hidden, true);
+  assert.equal(page.run('historyHasNewEvents'), false);
+});
+
+test('manually scrolling back to the latest clears the new-message indicator', () => {
+  const page = renderer('chat');
+  const events = page.elements.get('events');
+  Object.assign(events, { clientHeight: 300, scrollHeight: 1000, scrollTop: 100 });
+  page.run('historyHasNewEvents = true; updateHistoryJump()');
+  assert.equal(page.elements.get('historyLatest').hidden, false);
+  events.scrollTop = 690;
+  page.run('updateHistoryJump()');
+  assert.equal(page.elements.get('historyLatest').hidden, true);
+  assert.equal(page.run('historyHasNewEvents'), false);
+});
+
+test('file progress updates do not steal the reading position or claim new messages', () => {
+  const page = renderer('chat');
+  const events = page.elements.get('events');
+  Object.assign(events, { clientHeight: 300, scrollHeight: 1000, scrollTop: 120 });
+  page.show({ phase: 'uploading', progress: 10 });
+  page.show({ phase: 'uploading', progress: 50 });
+  assert.equal(events.scrollTop, 120);
+  assert.equal(page.elements.get('historyLatest').hidden, false);
+  assert.equal(page.elements.get('historyLatest').textContent, '回到最新 ↓');
+  assert.equal(events.children.length, 1);
+});
+
+test('switching rooms clears the old conversation jump indicator', () => {
+  const page = renderer('chat');
+  Object.assign(page.elements.get('events'), { clientHeight: 300, scrollHeight: 1000, scrollTop: 120 });
+  page.run('historyHasNewEvents = true; updateHistoryJump(); clearConversation()');
+  assert.equal(page.elements.get('historyLatest').hidden, true);
+  assert.equal(page.run('historyHasNewEvents'), false);
+});

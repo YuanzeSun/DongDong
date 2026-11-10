@@ -34,16 +34,18 @@ jobs:
         if: matrix.command == 'dist:mac'
         run: npm run dist:mac
         env:
-          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ github.event_name != 'pull_request' && secrets.MAC_CERTIFICATE_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.MAC_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
       - name: Build Windows installer
         if: matrix.command == 'dist:win'
         run: npm run dist:win
+      # electron-builder intentionally skips signing pull-request builds.
+      # Keep signature verification mandatory for main, tag, and manual builds.
       - name: Verify macOS app signature
-        if: matrix.command == 'dist:mac'
+        if: matrix.command == 'dist:mac' && github.event_name != 'pull_request'
         shell: bash
         run: |
           app_path="$(find release -type d -name '*.app' -print -quit)"
